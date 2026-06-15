@@ -8,12 +8,16 @@ monocle = pd.read_csv("/data/pam/team230/sm71/scratch/gps_project/metadata/resul
 nan_gpsc = monocle["GPSC"].isna().sum()
 monocle = monocle.dropna(subset=["GPSC"])
 
-# duplicate rows with multiple GPSC assignments (e.g. "932;1222") — one row per GPSC
+# for samples with multiple GPSC assignments (e.g. "1215;5"), pick the smallest numeric value.
+# smaller = current canonical label under v11 (higher labels were merged into lower ones).
 multi_gpsc = monocle["GPSC"].astype(str).str.contains(";")
 multi_gpsc_df = monocle.loc[multi_gpsc, ["Sample_ID", "GPSC"]].copy()
-monocle["GPSC"] = monocle["GPSC"].astype(str).str.split(";")
-monocle = monocle.explode("GPSC")
-monocle["GPSC"] = pd.to_numeric(monocle["GPSC"].str.strip())
+monocle["GPSC"] = (
+    monocle["GPSC"]
+    .astype(str)
+    .str.split(";")
+    .apply(lambda parts: min(int(p.strip()) for p in parts))
+)
 
 # sort by GPSC number, then Sample_ID lexicographically within each group
 monocle = monocle.sort_values(["GPSC", "Sample_ID"])
@@ -52,10 +56,14 @@ lines = [
     f"Total assemblies written: {len(monocle)}",
     f"Samples with GPSC labels: {len(gpsc_mapping)}",
     f"Samples with no GPSC assignment (dropped): {nan_gpsc}",
-    f"Samples with multiple GPSC assignments (duplicated): {len(multi_gpsc_df)}",
+    f"Samples with multiple GPSC assignments (resolved to smallest): {len(multi_gpsc_df)}",
 ]
 if not multi_gpsc_df.empty:
-    lines.append(multi_gpsc_df.to_string(index=False))
+    resolved = multi_gpsc_df.copy()
+    resolved["GPSC_resolved"] = resolved["GPSC"].str.split(";").apply(
+        lambda parts: min(int(p.strip()) for p in parts)
+    )
+    lines.append(resolved.to_string(index=False))
 
 stats_path = "/data/pam/team230/sm71/scratch/gps_project/themisto2/stats.txt"
 with open(stats_path, "w") as f:
