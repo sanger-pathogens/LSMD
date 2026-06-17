@@ -14,44 +14,61 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--themisto-output",
+        "--manifest",
         required=True,
-        help="Themisto2 JSONL output file, e.g. pseudoalign_check.o or clean JSONL output.",
+        type=Path,
+        help="Path to manifest file containing 'sample_ID' column from metadata, JSONL file output from themisto threshold-pseudoalign, Path to the query's fasta file and known GPSC label (This is an optional column to fill, metadata file provided can automatically fill this blank space).",
     )
 
     parser.add_argument(
         "--mapping",
         required=True,
-        help="TSV mapping file where row index = Themisto color ID, with columns Sample_ID and GPSC.",
+        type=Path,
+        help="Path to TSV mapping file where row index = Themisto color ID, with columns Sample_ID and GPSC.",
     )
 
     parser.add_argument(
-        "--query-sample",
-        default=None,
-        help="Optional sample ID to check in the mapping file, e.g. 43684_1#53.",
-    )
-
-    parser.add_argument(
-        "--skip-contigs-over",
-        type=int,
-        default=None,
-        help="Optional: skip contigs with more than this many color hits. Useful for removing broad/core contigs.",
+            for idx, row in matches.iterrows():
+        required=True,
+        type=Path,
+        help=(
+            "Path to metadata of reference genomes that make up the index the query is compared against. "
+            "Required columns: 'Assembly_length' and 'GPSC'."
+        ),
     )
 
     parser.add_argument(
         "--top",
         type=int,
-        default=30,
-        help="Number of top GPSCs to print. Default: 30.",
+        default=20,
+        help="Number of top GPSCs to print. Default: 20.",
     )
 
     parser.add_argument(
-        "--out-prefix",
-        default="themisto_gpsc_summary",
-        help="Output prefix for TSV result files. Default: themisto_gpsc_summary.",
+        "--kmer-size",
+        type=int,
+        default=31,
+        help="base-pair size of the k-mers used in the Themisto index. Default: 31.",
+    )
+
+    parser.add_argument(
+        "--min-contig-coverage",
+        type=float,
+        default=None,
+        help="Minimum coverage filter threshold for each contig in a query. No default. Adjust to user's preference",
+    )
+
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("results/"),
+        help=(
+            "Path to the GPSC summary output files. Default: results/."
+        ),
     )
 
     return parser.parse_args()
+
 
 
 def load_mapping(mapping_path):
