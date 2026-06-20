@@ -164,6 +164,19 @@ def load_mapping(mapping_path):
     return mapping
 
 
+def load_metadata(metadata_path):
+    sep = "," if str(metadata_path).endswith(".csv") else "\t"
+    metadata = pd.read_csv(metadata_path, sep=sep, low_memory=False)
+
+    required_cols = {"Assembly_Length", "GPSC"}
+    missing = required_cols - set(metadata.columns)
+
+    if missing:
+        raise ValueError(f"Metadata file is missing required columns: {missing}.")
+
+    return metadata
+
+
 def parse_themisto_output(themisto_output, mapping, skip_contigs_over=None):
     raw_gpsc_hits = Counter()
     unique_colors_by_gpsc = defaultdict(set)
