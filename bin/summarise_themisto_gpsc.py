@@ -256,6 +256,12 @@ def resolve_gpsc_for_manifest(manifest, metadata):
     return manifest
 
 
+def compute_contig_coverage(bases_covered_list, contig_length):
+    if not bases_covered_list or not contig_length:
+        return None
+    return max(bases_covered_list) / contig_length
+
+
 def parse_themisto_output(themisto_output, mapping, skip_contigs_over=None):
     raw_gpsc_hits = Counter()
     unique_colors_by_gpsc = defaultdict(set)
