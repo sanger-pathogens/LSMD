@@ -28,7 +28,7 @@ def parse_args():
     )
 
     parser.add_argument(
-            for idx, row in matches.iterrows():
+        "--metadata",
         required=True,
         type=Path,
         help=(
@@ -45,13 +45,6 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--kmer-size",
-        type=int,
-        default=31,
-        help="base-pair size of the k-mers used in the Themisto index. Default: 31.",
-    )
-
-    parser.add_argument(
         "--min-contig-coverage",
         type=float,
         default=None,
@@ -65,6 +58,13 @@ def parse_args():
         help=(
             "Path to the GPSC summary output files. Default: results/."
         ),
+    )
+
+    parser.add_argument(
+        "--min-unique-refs",
+        type=int,
+        default=10,
+        help="Minimum number of unique matched references a GPSC must have to be considered for the top prediction. Default: 10.",
     )
 
     return parser.parse_args()
