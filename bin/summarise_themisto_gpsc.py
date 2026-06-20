@@ -110,6 +110,19 @@ def parse_args():
 
     return parser.parse_args()
 
+#Input functions
+def read_manifest(manifest_path):
+    # validate required columns in the manifest file
+    # keep full dataframe for later use, including optional columns like GPSC
+
+    manifest = pd.read_csv(manifest_path, sep="\t")
+    required_cols = {"Sample_ID", "JSONL_path", "fasta_path"}
+
+    missing = required_cols - set(manifest.columns)
+    if missing:
+        raise ValueError(f"Manifest file is missing required columns: {missing}.")
+
+    return manifest
 
 
 def load_mapping(mapping_path):
