@@ -125,6 +125,27 @@ def read_manifest(manifest_path):
     return manifest
 
 
+def load_query_rows(manifest):
+    # Normalize and validate each row in a multi-query manifest.
+    # This helper turns a raw manifest row into a predictable record,
+    # so downstream code can just use sample_id, jsonl_path, fasta_path, and known_gpsc.
+    query_rows = []
+
+    for _, row in manifest.iterrows():
+        query_row = {
+            "Sample_ID": str(row["Sample_ID"]),
+            "JSONL_path": Path(row["JSONL_path"]),
+            "fasta_path": Path(row["fasta_path"]),
+            # known_gpsc may be blank; keep None if not supplied
+            "known_gpsc": None if pd.isna(row.get("GPSC", None)) else str(row.get("GPSC")),
+        }
+
+        # You can also normalize alternative column names here if needed.
+        query_rows.append(query_row)
+
+    return query_rows
+
+
 def load_mapping(mapping_path):
     mapping = pd.read_csv(mapping_path, sep="\t")
 
