@@ -147,6 +147,8 @@ def load_query_rows(manifest):
 
 
 def load_mapping(mapping_path):
+    # validate sample_ID and GPSC columns in the mapping file
+    # preserve color-row ordering, color IDs are implicit by row. setup mapping.index
     mapping = pd.read_csv(mapping_path, sep="\t")
 
     required_cols = {"Sample_ID", "GPSC"}
@@ -154,12 +156,10 @@ def load_mapping(mapping_path):
 
     if missing:
         raise ValueError(
-            f"Mapping file is missing required columns: {missing}. "
-            f"Found columns: {list(mapping.columns)}"
-        )
+            f"Mapping file is missing required columns: {missing}. ")
 
     mapping["Sample_ID"] = mapping["Sample_ID"].astype(str)
-    mapping["GPSC"] = mapping["GPSC"].astype(str)
+    mapping["GPSC"] = mapping["GPSC"].astype(int)
 
     return mapping
 
