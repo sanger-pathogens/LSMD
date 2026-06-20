@@ -262,32 +262,31 @@ def compute_contig_coverage(bases_covered_list, contig_length):
     return max(bases_covered_list) / contig_length
 
 
-def parse_themisto_output(themisto_output, mapping, skip_contigs_over=None):
-    raw_gpsc_hits = Counter()
+def parse_themisto_output(jsonl_path, mapping, contig_lengths, min_contig_coverage):
+    themisto_output = Path(jsonl_path)
+
+    if not themisto_output.exists():
+        raise FileNotFoundError(f"Themisto output not found: {themisto_output}")
+
+    gpsc_list = mapping["GPSC"].tolist()
+    n_ref = len(gpsc_list)
+
+    weighted_kmer_hits = Counter()
     unique_colors_by_gpsc = defaultdict(set)
     contig_support = Counter()
-
     colors_per_contig = []
     skipped_contigs = []
-
     parsed_json_records = 0
     parsed_json_records_used = 0
-
-    total_color_hits = 0
     unmapped_color_ids = set()
 
-    with open(themisto_output) as f:
+    with themisto_output.open() as f:
         for line in f:
             line = line.strip()
-
-            # Skip LSF text/logs. Themisto records start with JSON.
-            if not line.startswith("{"):
+            if not line:
                 continue
 
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                continue
+            rec = json.loads(line)
 
             if "colors" not in rec:
                 continue
@@ -296,51 +295,58 @@ def parse_themisto_output(themisto_output, mapping, skip_contigs_over=None):
 
             contig = rec.get("name", "unknown_contig")
             colors = rec.get("colors", [])
+            bases_covered_list = rec.get("bases_covered", [])
 
-            colors_per_contig.append(
-                {
-                    "contig": contig,
-                    "n_colors": len(colors),
-                }
+            contig_length = contig_lengths.get(contig)
+            coverage_fraction = compute_contig_coverage(bases_covered_list, contig_length)
+
+            passed = (
+                min_contig_coverage is None
+                or coverage_fraction is None
+                or coverage_fraction >= min_contig_coverage
             )
 
-            if skip_contigs_over is not None and len(colors) > skip_contigs_over:
-                skipped_contigs.append(
-                    {
-                        "contig": contig,
-                        "n_colors": len(colors),
-                    }
-                )
+            contig_record = {
+                "contig": contig,
+                "n_matched_refs": len(colors),
+                "best_ref_kmer_coverage": coverage_fraction,
+                "passed_coverage_filter": passed,
+            }
+
+            if not passed:
+                skipped_contigs.append(contig_record)
                 continue
 
+            colors_per_contig.append(contig_record)
             parsed_json_records_used += 1
-
             gpscs_on_this_contig = set()
 
-            for color in colors:
-                if color < 0 or color >= len(mapping):
+            for idx, color in enumerate(colors):
+                if color < 0 or color >= n_ref:
                     unmapped_color_ids.add(color)
                     continue
 
-                gpsc = mapping.iloc[color]["GPSC"]
-
-                raw_gpsc_hits[gpsc] += 1
+                gpsc = gpsc_list[color]
+                bases_cov = bases_covered_list[idx] if idx < len(bases_covered_list) else 0
+                coverage_contribution = (
+                    bases_cov / contig_length
+                    if contig_length else 0
+                )
+                weighted_kmer_hits[gpsc] += coverage_contribution
                 unique_colors_by_gpsc[gpsc].add(color)
                 gpscs_on_this_contig.add(gpsc)
-                total_color_hits += 1
 
             for gpsc in gpscs_on_this_contig:
                 contig_support[gpsc] += 1
 
     return {
-        "raw_gpsc_hits": raw_gpsc_hits,
+        "weighted_kmer_hits": weighted_kmer_hits,
         "unique_colors_by_gpsc": unique_colors_by_gpsc,
         "contig_support": contig_support,
         "colors_per_contig": colors_per_contig,
         "skipped_contigs": skipped_contigs,
         "parsed_json_records": parsed_json_records,
         "parsed_json_records_used": parsed_json_records_used,
-        "total_color_hits": total_color_hits,
         "unmapped_color_ids": unmapped_color_ids,
     }
 
