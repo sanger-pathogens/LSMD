@@ -241,6 +241,21 @@ def load_fasta_lengths(fasta_path):
     return contig_lengths
 
 
+def resolve_gpsc_for_manifest(manifest, metadata):
+    if "GPSC" not in manifest.columns:
+        manifest = manifest.copy()
+        manifest["GPSC"] = None
+
+    gpsc_lookup = metadata.set_index("Sample_ID")["GPSC"].to_dict()
+
+    manifest = manifest.copy()
+    manifest["GPSC"] = manifest["GPSC"].astype(object)
+    mask = manifest["GPSC"].isna()
+    manifest.loc[mask, "GPSC"] = manifest.loc[mask, "Sample_ID"].map(gpsc_lookup)
+
+    return manifest
+
+
 def parse_themisto_output(themisto_output, mapping, skip_contigs_over=None):
     raw_gpsc_hits = Counter()
     unique_colors_by_gpsc = defaultdict(set)
