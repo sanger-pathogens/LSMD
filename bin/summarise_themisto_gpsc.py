@@ -409,101 +409,66 @@ def print_top_tables(summary, top):
 def main():
     args = parse_args()
 
-    themisto_output = Path(args.themisto_output)
-    mapping_path = Path(args.mapping)
+    args.output.mkdir(parents=True, exist_ok=True)
 
-    if not themisto_output.exists():
-        raise FileNotFoundError(f"Themisto output not found: {themisto_output}")
+    manifest = read_manifest(args.manifest)
+    mapping = load_mapping(args.mapping)
+    metadata = load_metadata(args.metadata)
 
-    if not mapping_path.exists():
-        raise FileNotFoundError(f"Mapping file not found: {mapping_path}")
+    manifest = resolve_gpsc_for_manifest(manifest, metadata)
+    query_rows = load_query_rows(manifest)
 
-    mapping = load_mapping(mapping_path)
+    for query in query_rows:
+        sample_id = query["Sample_ID"]
 
-    print("Loaded mapping file")
-    print(f"Mapping path: {mapping_path}")
-    print(f"Mapping rows / Themisto colors: {len(mapping)}")
-    print(f"Mapping columns: {list(mapping.columns)}")
+        contig_lengths = load_fasta_lengths(query["fasta_path"])
 
-    if args.query_sample:
-        matches = mapping[mapping["Sample_ID"] == args.query_sample]
-
-        print("\nQuery sample check:")
-        if len(matches) == 0:
-            print(f"{args.query_sample} was NOT found exactly in the mapping.")
-        else:
-            for idx, row in matches.iterrows():
-                print(
-                    f"color_id={idx}\t"
-                    f"Sample_ID={row['Sample_ID']}\t"
-                    f"GPSC={row['GPSC']}"
-                )
-
-    results = parse_themisto_output(
-        themisto_output=themisto_output,
-        mapping=mapping,
-        skip_contigs_over=args.skip_contigs_over,
-    )
-
-    print("\nParsed Themisto output")
-    print(f"Themisto output: {themisto_output}")
-    print(f"Parsed JSON records total: {results['parsed_json_records']}")
-    print(f"Parsed JSON records used: {results['parsed_json_records_used']}")
-    print(f"Total color hits counted: {results['total_color_hits']}")
-    print(f"Unmapped color IDs: {len(results['unmapped_color_ids'])}")
-
-    if args.skip_contigs_over is not None:
-        print(
-            f"Skipped contigs over {args.skip_contigs_over} color hits: "
-            f"{len(results['skipped_contigs'])}"
+        results = parse_themisto_output(
+            jsonl_path=query["JSONL_path"],
+            mapping=mapping,
+            contig_lengths=contig_lengths,
+            min_contig_coverage=args.min_contig_coverage,
         )
 
-    colors_per_contig = pd.DataFrame(results["colors_per_contig"])
-    skipped_contigs = pd.DataFrame(results["skipped_contigs"])
+        summary = make_summary_tables(results, mapping)
 
-    summary = make_summary_tables(results, mapping)
+        sorted_summary = summary.sort_values("gpsc_score", ascending=False)
+        scores = sorted_summary["gpsc_score"]
+        top_score = scores.iloc[0] if len(scores) > 0 else 0
+        second_score = scores.iloc[1] if len(scores) > 1 else 0
+        total_score = scores.sum()
 
-    print_top_tables(summary, args.top)
+        score_ratio = top_score / second_score if second_score > 0 else None
+        top_score_fraction = top_score / total_score if total_score > 0 else 0
 
-    out_prefix = args.out_prefix
+        eligible = sorted_summary[sorted_summary["unique_matched_refs"] >= args.min_unique_refs]
+        top_gpsc = str(int(float(eligible.iloc[0]["GPSC"]))) if len(eligible) > 0 else "NA"
+        match = int(float(top_gpsc)) == int(float(str(query["known_gpsc"]))) if query["known_gpsc"] is not None and top_gpsc != "NA" else None
 
-    summary_out = f"{out_prefix}.gpsc_summary.tsv"
-    contig_out = f"{out_prefix}.colors_per_contig.tsv"
-    skipped_out = f"{out_prefix}.skipped_contigs.tsv"
+        contig_cols = ["contig", "n_matched_refs", "best_ref_kmer_coverage", "passed_coverage_filter"]
+        colors_per_contig = pd.DataFrame(results["colors_per_contig"], columns=contig_cols)
+        skipped_contigs = pd.DataFrame(results["skipped_contigs"], columns=contig_cols)
 
-    summary.sort_values(
-        [
-            "normalised_raw_percent",
-            "raw_hit_percent",
-            "normalised_unique_fraction",
-            "unique_hit_colors",
-            "raw_color_hits",
-        ],
-        ascending=[False, False, False, False, False],
-    ).to_csv(summary_out, sep="\t", index=False)
+        sorted_summary.head(args.top).to_csv(args.output / f"{sample_id}.gpsc_summary.tsv", sep="\t", index=False)
 
-    colors_per_contig.sort_values("n_colors", ascending=False).to_csv(
-        contig_out, sep="\t", index=False
-    )
+        pd.DataFrame([{
+            "Sample_ID": sample_id,
+            "predicted_GPSC": top_gpsc,
+            "known_GPSC": query["known_gpsc"],
+            "match": match,
+            "top_to_2nd_score_ratio": score_ratio,
+            "top_score_fraction": top_score_fraction,
+            "top_gpsc_score": top_score,
+        }]).to_csv(args.output / f"{sample_id}.classification.tsv", sep="\t", index=False)
 
-    if len(skipped_contigs) > 0:
-        skipped_contigs.sort_values("n_colors", ascending=False).to_csv(
-            skipped_out, sep="\t", index=False
+        colors_per_contig.sort_values("n_matched_refs", ascending=False).to_csv(
+            args.output / f"{sample_id}.colors_per_contig.tsv", sep="\t", index=False
         )
 
-    print("\nSaved output files:")
-    print(summary_out)
-    print(contig_out)
-
-    if len(skipped_contigs) > 0:
-        print(skipped_out)
-
-    print("\nMain interpretation:")
-    print(
-        "Use 'normalised_raw_percent' first for comparing GPSCs of different sizes. "
-        "Use 'raw_hit_percent' only as the percentage of all observed hits. "
-        "If many contigs hit tens of thousands of colors, the run is still too broad."
-    )
+        if len(skipped_contigs) > 0:
+            skipped_contigs.to_csv(
+                args.output / f"{sample_id}.skipped_contigs.tsv", sep="\t", index=False
+            )
 
 
 if __name__ == "__main__":
