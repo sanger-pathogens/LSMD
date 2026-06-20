@@ -177,6 +177,70 @@ def load_metadata(metadata_path):
     return metadata
 
 
+def load_fasta_lengths(fasta_path):
+    # Parse contig lengths from a FASTA file.
+    # If the FASTA header includes an explicit length annotation such as
+    # len=1234 or length=1234, use that. Otherwise compute contig length
+    # from the sequence lines that follow the header.
+    fasta_path = Path(fasta_path)
+    if not fasta_path.exists():
+        raise FileNotFoundError(f"FASTA file not found: {fasta_path}")
+
+    def _parse_header_length(header):
+        for marker in ("len=", "length=", "LN=", "LN:"):
+            if marker in header:
+                start = header.index(marker) + len(marker)
+                digits = []
+                for ch in header[start:]:
+                    if ch.isdigit():
+                        digits.append(ch)
+                    else:
+                        break
+                if digits:
+                    return int("".join(digits))
+        return None
+
+    contig_lengths = {}
+    current_name = None
+    current_length = 0
+    use_header_length = False
+
+    opener = gzip.open if str(fasta_path).endswith(".gz") else open
+    with opener(fasta_path, "rt") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+
+            if line.startswith(">"):
+                if current_name is not None:
+                    contig_lengths[current_name] = current_length
+
+                header = line[1:].strip()
+                current_name = header.split()[0]
+                header_length = _parse_header_length(header)
+
+                if header_length is not None:
+                    current_length = header_length
+                    use_header_length = True
+                else:
+                    current_length = 0
+                    use_header_length = False
+
+                continue
+
+            if current_name is None:
+                continue
+
+            if not use_header_length:
+                current_length += len(line)
+
+    if current_name is not None:
+        contig_lengths[current_name] = current_length
+
+    return contig_lengths
+
+
 def parse_themisto_output(themisto_output, mapping, skip_contigs_over=None):
     raw_gpsc_hits = Counter()
     unique_colors_by_gpsc = defaultdict(set)
