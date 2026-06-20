@@ -355,62 +355,37 @@ def make_summary_tables(results, mapping):
     gpsc_size = mapping["GPSC"].value_counts().to_dict()
 
     all_gpscs = set(gpsc_size)
-    all_gpscs.update(results["raw_gpsc_hits"].keys())
+    all_gpscs.update(results["weighted_kmer_hits"].keys())
     all_gpscs.update(results["unique_colors_by_gpsc"].keys())
     all_gpscs.update(results["contig_support"].keys())
 
     rows = []
 
-    total_color_hits = results["total_color_hits"]
     parsed_contigs_used = results["parsed_json_records_used"]
 
     for gpsc in sorted(all_gpscs, key=lambda x: str(x)):
-        raw_hits = results["raw_gpsc_hits"].get(gpsc, 0)
+        wkh = results["weighted_kmer_hits"].get(gpsc, 0)
         unique_hits = len(results["unique_colors_by_gpsc"].get(gpsc, set()))
         size = gpsc_size.get(gpsc, 0)
         contigs = results["contig_support"].get(gpsc, 0)
 
-        # % of all observed color hits that belong to this GPSC.
-        # Biased by GPSC size.
-        raw_hit_percent = (
-            100 * raw_hits / total_color_hits
-            if total_color_hits
-            else 0
+        gpsc_score = (
+            (wkh / size) * (unique_hits / size) ** 0.5
+            if size else 0
         )
 
-        # % of reference colors in that GPSC that were hit at least once.
-        # Can become uninformative if broad contigs hit nearly everything.
-        normalised_unique_fraction = (
-            unique_hits / size
-            if size
-            else 0
-        )
+        contig_hit_fraction = contigs / parsed_contigs_used if parsed_contigs_used > 0 else 0
 
-        # Better cross-GPSC comparison:
-        # observed hits for this GPSC divided by the maximum possible hits
-        # for that GPSC across the contigs that were actually used.
-        normalised_raw_percent = (
-            100 * raw_hits / (size * parsed_contigs_used)
-            if size and parsed_contigs_used
-            else 0
-        )
+        rows.append({
+            "GPSC": gpsc,
+            "sum_contig_coverage": wkh,
+            "unique_matched_refs": unique_hits,
+            "gpsc_size": size,
+            "gpsc_score": gpsc_score,
+            "contig_hit_fraction": contig_hit_fraction,
+        })
 
-        rows.append(
-            {
-                "GPSC": gpsc,
-                "raw_color_hits": raw_hits,
-                "raw_hit_percent": raw_hit_percent,
-                "normalised_raw_percent": normalised_raw_percent,
-                "unique_hit_colors": unique_hits,
-                "gpsc_reference_size": size,
-                "normalised_unique_fraction": normalised_unique_fraction,
-                "contigs_supporting_gpsc": contigs,
-            }
-        )
-
-    summary = pd.DataFrame(rows)
-
-    return summary
+    return pd.DataFrame(rows)
 
 
 def print_top_tables(summary, top):
