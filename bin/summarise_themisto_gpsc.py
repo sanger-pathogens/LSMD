@@ -1,5 +1,46 @@
 #!/usr/bin/env python3
 
+# =============================================================================
+# Output file column definitions
+# =============================================================================
+#
+# {sample_id}.gpsc_summary.tsv  — top N GPSCs by gpsc_score (N = --top, default 20)
+#   GPSC                  : GPSC lineage identifier
+#   sum_contig_coverage   : sum of per-contig base coverage fractions across
+#                           all contigs and all matched references in this GPSC
+#                           (each contig contributes bases_covered / possible_kmers,
+#                           bounded at 1 per contig-reference pair)
+#   unique_matched_refs   : number of distinct reference genomes in this GPSC
+#                           that received at least one hit
+#   gpsc_size             : total number of reference genomes in this GPSC
+#   gpsc_score            : (sum_contig_coverage / gpsc_size) *
+#                           sqrt(unique_matched_refs / gpsc_size)
+#                           mean per-reference coverage weighted by a sqrt
+#                           diversity penalty (fraction of GPSC refs matched)
+#   contig_hit_fraction   : fraction of query contigs with any hit to this GPSC
+#                           (contigs_with_any_hit / total_contigs_used)
+#
+# {sample_id}.colors_per_contig.tsv  — one row per query contig
+#   contig                : contig name from the query FASTA
+#   n_matched_refs        : number of reference genomes that matched this contig
+#   best_ref_kmer_coverage: fraction of contig k-mers covered by the
+#                           best-matching reference (max bases_covered / possible_kmers)
+#   passed_coverage_filter: whether the contig passed --min-contig-coverage
+#
+# {sample_id}.classification.tsv  — one row per query sample
+#   Sample_ID             : sample identifier from the manifest
+#   predicted_GPSC        : top-ranked GPSC by gpsc_score among those with
+#                           unique_matched_refs >= --min-unique-refs
+#   known_GPSC            : ground-truth GPSC from the manifest (if provided)
+#   match                 : True/False whether predicted matches known GPSC
+#   top_to_2nd_score_ratio: gpsc_score of rank-1 / gpsc_score of rank-2;
+#                           ratio close to 1.0 means the call is uncertain
+#   top_score_fraction    : rank-1 gpsc_score / sum of all gpsc_scores;
+#                           fraction of total evidence pointing to the top GPSC
+#   top_gpsc_score        : raw gpsc_score of the predicted GPSC
+# =============================================================================
+
+import gzip
 import json
 import argparse
 from collections import Counter, defaultdict
