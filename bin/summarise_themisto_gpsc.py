@@ -391,39 +391,16 @@ def make_summary_tables(results, mapping):
 def print_top_tables(summary, top):
     cols = [
         "GPSC",
-        "raw_color_hits",
-        "raw_hit_percent",
-        "normalised_raw_percent",
-        "gpsc_reference_size",
-        "unique_hit_colors",
-        "normalised_unique_fraction",
-        "contigs_supporting_gpsc",
+        "sum_contig_coverage",
+        "unique_matched_refs",
+        "gpsc_size",
+        "gpsc_score",
+        "contig_hit_fraction",
     ]
 
-    print("\nTop GPSCs by NORMALISED raw percentage:")
+    print("\nTop GPSCs by gpsc_score:")
     print(
-        summary.sort_values("normalised_raw_percent", ascending=False)
-        .head(top)[cols]
-        .to_string(index=False)
-    )
-
-    print("\nTop GPSCs by raw hit percentage:")
-    print(
-        summary.sort_values("raw_hit_percent", ascending=False)
-        .head(top)[cols]
-        .to_string(index=False)
-    )
-
-    print("\nTop GPSCs by UNIQUE hit colors:")
-    print(
-        summary.sort_values("unique_hit_colors", ascending=False)
-        .head(top)[cols]
-        .to_string(index=False)
-    )
-
-    print("\nTop GPSCs by NORMALISED unique-color fraction:")
-    print(
-        summary.sort_values("normalised_unique_fraction", ascending=False)
+        summary.sort_values("gpsc_score", ascending=False)
         .head(top)[cols]
         .to_string(index=False)
     )
