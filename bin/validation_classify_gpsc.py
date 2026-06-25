@@ -6,17 +6,17 @@
 #
 # {sample_id}.gpsc_summary.tsv  — top N GPSCs by gpsc_score (N = --top, default 20)
 #   GPSC                  : GPSC lineage identifier
-#   sum_contig_coverage   : sum of per-contig base coverage fractions across
-#                           all contigs and all matched references in this GPSC
-#                           (each contig contributes bases_covered / possible_kmers,
-#                           bounded at 1 per contig-reference pair)
+#   avg_hit_breadth_cov   : length-weighted average breadth of coverage across
+#                           all query contigs that hit this GPSC;
+#                           computed as sum(bases_covered) / sum(contig_lengths)
+#                           for all contigs with at least one hit to the GPSC
 #   unique_matched_refs   : number of distinct reference genomes in this GPSC
 #                           that received at least one hit
 #   gpsc_size             : total number of reference genomes in this GPSC
-#   gpsc_score            : (sum_contig_coverage / gpsc_size) *
+#   gpsc_score            : (avg_hit_breadth_cov / gpsc_size) *
 #                           sqrt(unique_matched_refs / gpsc_size)
-#                           mean per-reference coverage weighted by a sqrt
-#                           diversity penalty (fraction of GPSC refs matched)
+#                           length-weighted coverage normalised by GPSC size,
+#                           penalised by the sqrt fraction of GPSC refs matched
 #   contig_hit_fraction   : fraction of query contigs with any hit to this GPSC
 #                           (contigs_with_any_hit / total_contigs_used)
 #
@@ -89,7 +89,7 @@ def parse_args():
         "--min-contig-coverage",
         type=float,
         default=None,
-        help="Minimum coverage filter threshold for each contig in a query. No default. Adjust to user's preference",
+        help="Minimum fraction of contig k-mers that must be covered for a contig to be used. Default: None (no filter applied, equivalent to 0).",
     )
 
     parser.add_argument(
@@ -149,19 +149,19 @@ def load_query_rows(manifest):
 def load_mapping(mapping_path):
     # validate sample_ID and GPSC columns in the mapping file
     # preserve color-row ordering, color IDs are implicit by row. setup mapping.index
-    mapping = pd.read_csv(mapping_path, sep="\t")
+    color2sample_mapping = pd.read_csv(mapping_path, sep="\t")
 
     required_cols = {"Sample_ID", "GPSC"}
-    missing = required_cols - set(mapping.columns)
+    missing = required_cols - set(color2sample_mapping.columns)
 
     if missing:
         raise ValueError(
             f"Mapping file is missing required columns: {missing}. ")
 
-    mapping["Sample_ID"] = mapping["Sample_ID"].astype(str)
-    mapping["GPSC"] = mapping["GPSC"].astype(int)
+    color2sample_mapping["Sample_ID"] = color2sample_mapping["Sample_ID"].astype(str)
+    color2sample_mapping["GPSC"] = color2sample_mapping["GPSC"].astype(int)
 
-    return mapping
+    return color2sample_mapping
 
 
 def load_metadata(metadata_path):
@@ -262,16 +262,17 @@ def compute_contig_coverage(bases_covered_list, contig_length):
     return max(bases_covered_list) / contig_length
 
 
-def parse_themisto_output(jsonl_path, mapping, contig_lengths, min_contig_coverage):
+def parse_themisto_output(jsonl_path, color2sample_mapping, contig_lengths, min_contig_coverage):
     themisto_output = Path(jsonl_path)
 
     if not themisto_output.exists():
         raise FileNotFoundError(f"Themisto output not found: {themisto_output}")
 
-    gpsc_list = mapping["GPSC"].tolist()
+    gpsc_list = color2sample_mapping["GPSC"].tolist()
     n_ref = len(gpsc_list)
 
-    weighted_kmer_hits = Counter()
+    cumulative_bases_cov = defaultdict(int)   # sum of raw bases covered per GPSC across all hits
+    contig_lengths_by_gpsc = defaultdict(int) # sum of query contig lengths that hit each GPSC
     unique_colors_by_gpsc = defaultdict(set)
     contig_support = Counter()
     colors_per_contig = []
@@ -328,19 +329,17 @@ def parse_themisto_output(jsonl_path, mapping, contig_lengths, min_contig_covera
 
                 gpsc = gpsc_list[color]
                 bases_cov = bases_covered_list[idx] if idx < len(bases_covered_list) else 0
-                coverage_contribution = (
-                    bases_cov / contig_length
-                    if contig_length else 0
-                )
-                weighted_kmer_hits[gpsc] += coverage_contribution
+                cumulative_bases_cov[gpsc] += bases_cov
                 unique_colors_by_gpsc[gpsc].add(color)
                 gpscs_on_this_contig.add(gpsc)
 
             for gpsc in gpscs_on_this_contig:
                 contig_support[gpsc] += 1
+                contig_lengths_by_gpsc[gpsc] += contig_length or 0
 
     return {
-        "weighted_kmer_hits": weighted_kmer_hits,
+        "cumulative_bases_cov": cumulative_bases_cov,
+        "contig_lengths_by_gpsc": contig_lengths_by_gpsc,
         "unique_colors_by_gpsc": unique_colors_by_gpsc,
         "contig_support": contig_support,
         "colors_per_contig": colors_per_contig,
@@ -351,11 +350,11 @@ def parse_themisto_output(jsonl_path, mapping, contig_lengths, min_contig_covera
     }
 
 
-def make_summary_tables(results, mapping):
-    gpsc_size = mapping["GPSC"].value_counts().to_dict()
+def make_summary_tables(results, color2sample_mapping):
+    gpsc_size = color2sample_mapping["GPSC"].value_counts().to_dict()
 
     all_gpscs = set(gpsc_size)
-    all_gpscs.update(results["weighted_kmer_hits"].keys())
+    all_gpscs.update(results["cumulative_bases_cov"].keys())
     all_gpscs.update(results["unique_colors_by_gpsc"].keys())
     all_gpscs.update(results["contig_support"].keys())
 
@@ -364,13 +363,16 @@ def make_summary_tables(results, mapping):
     parsed_contigs_used = results["parsed_json_records_used"]
 
     for gpsc in sorted(all_gpscs, key=lambda x: str(x)):
-        wkh = results["weighted_kmer_hits"].get(gpsc, 0)
+        raw_bases = results["cumulative_bases_cov"].get(gpsc, 0)
+        total_contig_len = results["contig_lengths_by_gpsc"].get(gpsc, 0)
+        # length-weighted average breadth coverage across all query contigs hitting this GPSC
+        avg_hit_breadth_cov = raw_bases / total_contig_len if total_contig_len else 0
         unique_hits = len(results["unique_colors_by_gpsc"].get(gpsc, set()))
         size = gpsc_size.get(gpsc, 0)
         contigs = results["contig_support"].get(gpsc, 0)
 
         gpsc_score = (
-            (wkh / size) * (unique_hits / size) ** 0.5
+            (avg_hit_breadth_cov / size) * (unique_hits / size) ** 0.5
             if size else 0
         )
 
@@ -378,7 +380,7 @@ def make_summary_tables(results, mapping):
 
         rows.append({
             "GPSC": gpsc,
-            "sum_contig_coverage": wkh,
+            "avg_hit_breadth_cov": avg_hit_breadth_cov,
             "unique_matched_refs": unique_hits,
             "gpsc_size": size,
             "gpsc_score": gpsc_score,
@@ -391,7 +393,7 @@ def make_summary_tables(results, mapping):
 def print_top_tables(summary, top):
     cols = [
         "GPSC",
-        "sum_contig_coverage",
+        "avg_hit_breadth_cov",
         "unique_matched_refs",
         "gpsc_size",
         "gpsc_score",
@@ -412,7 +414,7 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
 
     manifest = read_manifest(args.manifest)
-    mapping = load_mapping(args.mapping)
+    color2sample_mapping = load_mapping(args.mapping)
     metadata = load_metadata(args.metadata)
 
     manifest = resolve_gpsc_for_manifest(manifest, metadata)
@@ -425,12 +427,12 @@ def main():
 
         results = parse_themisto_output(
             jsonl_path=query["JSONL_path"],
-            mapping=mapping,
+            color2sample_mapping=color2sample_mapping,
             contig_lengths=contig_lengths,
             min_contig_coverage=args.min_contig_coverage,
         )
 
-        summary = make_summary_tables(results, mapping)
+        summary = make_summary_tables(results, color2sample_mapping)
 
         sorted_summary = summary.sort_values("gpsc_score", ascending=False)
         scores = sorted_summary["gpsc_score"]
