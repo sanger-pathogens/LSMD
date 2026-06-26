@@ -44,6 +44,14 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
+
+def _open(path):
+    """Open a file for reading, transparently handling gzip if the path ends in .gz."""
+    path = Path(path)
+    if path.suffix == ".gz":
+        return gzip.open(path, "rt")
+    return open(path)
+
 import pandas as pd
 
 
@@ -138,7 +146,7 @@ def load_unitig_index(unitigs_path):
     colorset_to_unitigs = defaultdict(list)
     total_unitigs = 0
 
-    with open(unitigs_path) as fh:
+    with _open(unitigs_path) as fh:
         for line in fh:
             if not line.startswith(">"):
                 continue
@@ -217,7 +225,7 @@ def build_matrix(color_sets_path, color_to_gpsc, colorset_to_unitigs, out_dir, r
         if matrix_mode == "wt":
             out_fh.write("unitig_id\tgpsc\tgenome_count\n")
 
-        with open(color_sets_path) as in_fh:
+        with _open(color_sets_path) as in_fh:
             for _ in range(lines_to_skip):
                 next(in_fh, None)
 
@@ -282,7 +290,7 @@ def write_gpsc_fastas(unitig_to_gpscs, unitigs_path, all_gpscs, out_dir):
     try:
         current_id = None
         current_seq = None
-        with open(unitigs_path) as fh:
+        with _open(unitigs_path) as fh:
             for line in fh:
                 line = line.rstrip()
                 if line.startswith(">"):
