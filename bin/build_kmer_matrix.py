@@ -23,6 +23,7 @@ Inputs:
                         header format: > unitig_id=N color_set_id=M
     --assembly-suffix : suffix to strip from assembly filename to recover Sample_ID
     --out-dir         : output directory
+    --resume          : resume from a previous interrupted run (uses checkpoint file)
 
 Outputs:
     kmer_gpsc_matrix.tsv.gz        : sparse matrix — columns: unitig_id, gpsc, genome_count
@@ -44,6 +45,9 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 import pandas as pd
+
+
+CHECKPOINT_INTERVAL = 100_000  # raw lines between checkpoint saves
 
 
 def parse_args():
@@ -74,6 +78,10 @@ def parse_args():
     parser.add_argument(
         "--out-dir", required=True, type=Path,
         help="Output directory.",
+    )
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="Resume from a previous interrupted run using the checkpoint file.",
     )
     return parser.parse_args()
 
@@ -118,64 +126,102 @@ def load_color_to_gpsc(file_colors_path, gpsc_mapping_path, assembly_suffix):
     return color_to_gpsc, gpsc_genome_counts
 
 
-def load_unitig_data(unitigs_path):
+def load_unitig_index(unitigs_path):
     """
-    Stream export.unitigs.fa to build:
-      - colorset_to_unitigs : {color_set_id: [unitig_id, ...]}
-      - unitig_to_seq       : {unitig_id: sequence}
-
-    Both are needed: colorset_to_unitigs drives the matrix build;
-    unitig_to_seq is used when writing per-GPSC FASTAs.
+    Stream export.unitigs.fa to build colorset_to_unitigs only — sequences are
+    not stored here; write_gpsc_fastas re-streams the file to retrieve them.
 
     Returns:
-        colorset_to_unitigs: defaultdict(list)
-        unitig_to_seq      : dict {unitig_id (int): sequence (str)}
+        colorset_to_unitigs: defaultdict(list) {color_set_id: [unitig_id, ...]}
         total_unitigs      : int
     """
     colorset_to_unitigs = defaultdict(list)
-    unitig_to_seq = {}
     total_unitigs = 0
-    current_id = None
-    current_colorset = None
 
     with open(unitigs_path) as fh:
         for line in fh:
-            line = line.rstrip()
-            if line.startswith(">"):
-                header = line[1:].strip()
-                tokens = {kv.split("=")[0]: kv.split("=")[1] for kv in header.split() if "=" in kv}
-                current_id = int(tokens["unitig_id"])
-                current_colorset = int(tokens["color_set_id"])
-                colorset_to_unitigs[current_colorset].append(current_id)
-                total_unitigs += 1
-            elif current_id is not None:
-                unitig_to_seq[current_id] = line
+            if not line.startswith(">"):
+                continue
+            header = line[1:].strip()
+            tokens = {kv.split("=")[0]: kv.split("=")[1] for kv in header.split() if "=" in kv}
+            colorset_to_unitigs[int(tokens["color_set_id"])].append(int(tokens["unitig_id"]))
+            total_unitigs += 1
 
-    return colorset_to_unitigs, unitig_to_seq, total_unitigs
+    return colorset_to_unitigs, total_unitigs
 
 
-def build_matrix(color_sets_path, color_to_gpsc, colorset_to_unitigs, out_dir):
+def _rebuild_state_from_partial_matrix(matrix_path):
+    """Read a partial matrix to reconstruct kmer_gpsc_counts and unitig_to_gpscs."""
+    kmer_gpsc_counts = Counter()
+    unitig_to_gpscs = {}
+    with gzip.open(matrix_path, "rt") as fh:
+        next(fh)  # skip header
+        for line in fh:
+            parts = line.split("\t")
+            uid, gpsc = int(parts[0]), int(parts[1])
+            kmer_gpsc_counts[gpsc] += 1
+            if uid not in unitig_to_gpscs:
+                unitig_to_gpscs[uid] = []
+            unitig_to_gpscs[uid].append(gpsc)
+    return kmer_gpsc_counts, unitig_to_gpscs
+
+
+def build_matrix(color_sets_path, color_to_gpsc, colorset_to_unitigs, out_dir, resume=False):
     """
     Stream export.color_sets.txt. For each color set, compute per-GPSC genome
-    counts, write sparse matrix rows, and record which unitig_ids belong to
-    each GPSC (for FASTA output).
+    counts, write sparse matrix rows, and record which GPSCs each unitig belongs
+    to (for FASTA output).
+
+    Checkpoint behaviour (--resume):
+      Every CHECKPOINT_INTERVAL raw lines, the gzip buffer is flushed and the
+      raw line count is written to .matrix_checkpoint. On resume the partial
+      matrix is read back to reconstruct state, then processing continues from
+      the checkpoint line in append mode.
+
+      Safety note: the checkpoint is saved *after* the gzip flush, so in the
+      extremely unlikely event of a crash in that narrow window some rows may
+      be written twice. Downstream filtering tolerates this; if strict
+      deduplication is needed, re-run without --resume.
 
     Returns:
-        kmer_gpsc_counts  : Counter {gpsc: number of k-mers present for that GPSC}
-        gpsc_to_unitig_ids: defaultdict(set) {gpsc: {unitig_id, ...}}
-        total_written     : number of unitigs written to the matrix
+        kmer_gpsc_counts : Counter {gpsc: number of k-mers present for that GPSC}
+        unitig_to_gpscs  : dict {unitig_id: [gpsc, ...]}
+        total_written    : number of unitigs written to the matrix
     """
     matrix_path = out_dir / "kmer_gpsc_matrix.tsv.gz"
+    checkpoint_path = out_dir / ".matrix_checkpoint"
+
     kmer_gpsc_counts = Counter()
-    gpsc_to_unitig_ids = defaultdict(set)
+    unitig_to_gpscs = {}
     total_written = 0
     n_colors = len(color_to_gpsc)
+    lines_to_skip = 0
 
-    with gzip.open(matrix_path, "wt") as out_fh:
-        out_fh.write("unitig_id\tgpsc\tgenome_count\n")
+    if resume and checkpoint_path.exists() and matrix_path.exists():
+        lines_to_skip = int(checkpoint_path.read_text().strip())
+        print(
+            f"  Resuming: skipping {lines_to_skip:,} lines, reading partial matrix...",
+            file=sys.stderr,
+        )
+        kmer_gpsc_counts, unitig_to_gpscs = _rebuild_state_from_partial_matrix(matrix_path)
+        print(
+            f"  Partial matrix loaded: {sum(kmer_gpsc_counts.values()):,} rows, "
+            f"{len(unitig_to_gpscs):,} unitigs",
+            file=sys.stderr,
+        )
+        matrix_mode = "at"
+    else:
+        matrix_mode = "wt"
+
+    with gzip.open(matrix_path, matrix_mode) as out_fh:
+        if matrix_mode == "wt":
+            out_fh.write("unitig_id\tgpsc\tgenome_count\n")
 
         with open(color_sets_path) as in_fh:
-            for line in in_fh:
+            for _ in range(lines_to_skip):
+                next(in_fh, None)
+
+            for raw_line_num, line in enumerate(in_fh, start=lines_to_skip):
                 line = line.strip()
                 if not line:
                     continue
@@ -187,7 +233,6 @@ def build_matrix(color_sets_path, color_to_gpsc, colorset_to_unitigs, out_dir):
                 if not unitig_ids:
                     continue
 
-                # count genomes per GPSC for this color set
                 gpsc_counts = Counter()
                 for token in parts[2:]:  # skip color_set_id=N and size=M tokens
                     color_id = int(token)
@@ -199,34 +244,64 @@ def build_matrix(color_sets_path, color_to_gpsc, colorset_to_unitigs, out_dir):
                 if not gpsc_counts:
                     continue
 
+                gpsc_list = sorted(gpsc_counts)
                 for unitig_id in unitig_ids:
-                    for gpsc, count in sorted(gpsc_counts.items()):
-                        out_fh.write(f"{unitig_id}\t{gpsc}\t{count}\n")
+                    for gpsc in gpsc_list:
+                        out_fh.write(f"{unitig_id}\t{gpsc}\t{gpsc_counts[gpsc]}\n")
                         kmer_gpsc_counts[gpsc] += 1
-                        gpsc_to_unitig_ids[gpsc].add(unitig_id)
+                    unitig_to_gpscs[unitig_id] = gpsc_list
                     total_written += 1
 
-    return kmer_gpsc_counts, gpsc_to_unitig_ids, total_written
+                if resume and (raw_line_num + 1) % CHECKPOINT_INTERVAL == 0:
+                    out_fh.flush()
+                    checkpoint_path.write_text(str(raw_line_num + 1))
+
+    if checkpoint_path.exists():
+        checkpoint_path.unlink()
+
+    return kmer_gpsc_counts, unitig_to_gpscs, total_written
 
 
-def write_gpsc_fastas(gpsc_to_unitig_ids, unitig_to_seq, all_gpscs, out_dir):
+def write_gpsc_fastas(unitig_to_gpscs, unitigs_path, all_gpscs, out_dir):
     """
-    Write one gzipped FASTA per GPSC lineage containing all k-mers present in
-    at least one genome of that lineage (pre-filtering).
+    Stream export.unitigs.fa a second time, writing each unitig sequence to the
+    FASTA file of every GPSC it belongs to. All per-GPSC file handles are kept
+    open simultaneously during the single pass.
+
+    This avoids loading all sequences into memory (the main memory saving vs. the
+    original approach).
     """
     fasta_dir = out_dir / "gpsc_fastas"
     fasta_dir.mkdir(exist_ok=True)
 
-    for gpsc in all_gpscs:
-        unitig_ids = gpsc_to_unitig_ids.get(gpsc)
-        if not unitig_ids:
-            continue
-        fasta_path = fasta_dir / f"gpsc_{gpsc}_kmers.fa.gz"
-        with gzip.open(fasta_path, "wt") as fh:
-            for uid in sorted(unitig_ids):
-                seq = unitig_to_seq.get(uid)
-                if seq:
-                    fh.write(f">unitig_{uid}\n{seq}\n")
+    handles = {
+        gpsc: gzip.open(fasta_dir / f"gpsc_{gpsc}_kmers.fa.gz", "wt")
+        for gpsc in all_gpscs
+    }
+
+    try:
+        current_id = None
+        current_seq = None
+        with open(unitigs_path) as fh:
+            for line in fh:
+                line = line.rstrip()
+                if line.startswith(">"):
+                    if current_id is not None and current_seq is not None:
+                        for gpsc in unitig_to_gpscs.get(current_id, []):
+                            handles[gpsc].write(f">unitig_{current_id}\n{current_seq}\n")
+                    header = line[1:].strip()
+                    tokens = {kv.split("=")[0]: kv.split("=")[1] for kv in header.split() if "=" in kv}
+                    current_id = int(tokens["unitig_id"])
+                    current_seq = None
+                else:
+                    current_seq = line
+            # flush last record
+            if current_id is not None and current_seq is not None:
+                for gpsc in unitig_to_gpscs.get(current_id, []):
+                    handles[gpsc].write(f">unitig_{current_id}\n{current_seq}\n")
+    finally:
+        for fh in handles.values():
+            fh.close()
 
 
 def main():
@@ -240,18 +315,18 @@ def main():
     all_gpscs = sorted(gpsc_genome_counts)
     print(f"  {len(color_to_gpsc)} colors, {len(all_gpscs)} GPSC lineages", file=sys.stderr)
 
-    print("Loading unitig sequences and color set mapping from FASTA...", file=sys.stderr)
-    colorset_to_unitigs, unitig_to_seq, total_unitigs = load_unitig_data(args.unitigs)
+    print("Indexing unitig → color set mapping from FASTA...", file=sys.stderr)
+    colorset_to_unitigs, total_unitigs = load_unitig_index(args.unitigs)
     print(f"  {total_unitigs:,} unitigs, {len(colorset_to_unitigs):,} unique color sets", file=sys.stderr)
 
     print("Streaming color sets → building matrix...", file=sys.stderr)
-    kmer_gpsc_counts, gpsc_to_unitig_ids, total_written = build_matrix(
-        args.color_sets, color_to_gpsc, colorset_to_unitigs, args.out_dir
+    kmer_gpsc_counts, unitig_to_gpscs, total_written = build_matrix(
+        args.color_sets, color_to_gpsc, colorset_to_unitigs, args.out_dir, resume=args.resume
     )
     print(f"  {total_written:,} unitigs written to matrix", file=sys.stderr)
 
-    print("Writing per-GPSC k-mer FASTAs...", file=sys.stderr)
-    write_gpsc_fastas(gpsc_to_unitig_ids, unitig_to_seq, all_gpscs, args.out_dir)
+    print("Writing per-GPSC k-mer FASTAs (streaming FASTA)...", file=sys.stderr)
+    write_gpsc_fastas(unitig_to_gpscs, args.unitigs, all_gpscs, args.out_dir)
     print(f"  {len(all_gpscs)} FASTA files written to {args.out_dir}/gpsc_fastas/", file=sys.stderr)
 
     pd.DataFrame([
