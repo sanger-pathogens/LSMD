@@ -30,22 +30,27 @@ STEP 1 — Per-lineage loop (repeat for each lineage in LINEAGE_LIST)
 
   for lineage in LINEAGE_LIST:
 
-    1.1  Build lineagecore boolean vector
-         lineagecore = numpy.zeros(n_total_colors, dtype=bool)
-         lineagecore[LINEAGE_MAP[lineage]] = True
+    1.1  Build lineage_membership boolean vector
+         (implemented: build_colourid_to_lineage, find_lineage_colour_ids,
+         build_lineage_membership_vector)
+         lineage_membership = numpy.zeros(n_total_colors, dtype=bool)
+         lineage_membership[LINEAGE_MAP[lineage]] = True
 
     1.2  (Optional, per lineage) Build B as real SBWT index
          — only if doing an SBWT-native D for benchmarking/validation
          — otherwise skip; D computed in Python at step 1.5
 
     1.3  Iterate SPECIES_INDEX unitigs one at a time
+         (implemented: build_colorset_to_colourids, iter_unitig_lineage_stats)
          for each unitig:
-           parse header → get color set → build boolean vector `a`
+           parse header → get color_set_id → look up colour set →
+           build boolean vector `a`
 
-           core_pct    = sum(a & lineagecore) / sum(lineagecore)
-           outside_pct = sum(a & numpy.invert(lineagecore)) / sum(numpy.invert(lineagecore))
+           core_pct    = sum(a & lineage_membership) / sum(lineage_membership)
+           outside_pct = sum(a & numpy.invert(lineage_membership)) / sum(numpy.invert(lineage_membership))
 
     1.4  Apply threshold → build C[lineage]
+         (implemented: write_threshold_filtered_fasta)
          keep unitig if core_pct >= CORE_THRESHOLD
          (run twice per lineage if both core and catch-all modes are needed:
           CORE_THRESHOLD = 0.9-1.0 for core mode
@@ -53,32 +58,39 @@ STEP 1 — Per-lineage loop (repeat for each lineage in LINEAGE_LIST)
          write passing unitigs to C[lineage].fasta
 
     1.5  Compute D[lineage] = species-wide minus this lineage
-         — Python-native version (no per-lineage index needed):
-             for each unitig in SPECIES_INDEX:
-               in_D = a & numpy.invert(lineagecore)
-         — OR SBWT-native version if B[lineage] was built (step 1.2):
+         — SBWT-native (standard path):
              sbwt difference A.sbwt B_lineage.sbwt -o D_lineage.sbwt
-             dump D_lineage k-mers → D_kmers[lineage]
+             (queried directly via sbwt lookup in step 1.6, no dump-kmers needed)
+         — Python-native version is BENCHMARK-ONLY (see GPSC1 benchmark ticket),
+           only meaningful when compared at the threshold=100% boundary:
+             for each unitig in SPECIES_INDEX:
+               in_D = a & numpy.invert(lineage_membership)
 
-    1.6  Compute E[lineage] = C[lineage] − D[lineage]
-         for each unitig in C[lineage]:
-           drop if its k-mers appear in D_kmers[lineage] (or in-memory D from 1.5)
+    1.6  Compute E[lineage] = C[lineage] − D[lineage]     [NOT YET IMPLEMENTED]
+         sbwt lookup -i D_lineage.sbwt -q C[lineage].fasta -o membership.txt --membership-only
+         for each unitig in C[lineage], read its membership bitvector line:
+           # TODO (decide when writing this step): exact keep/drop rule from
+           # the bitvector — e.g. drop if ANY bit is 1 (strict), or drop if
+           # >X% of bits are 1 (lenient). Not yet decided.
          write survivors → E[lineage].fasta
 
-    1.7  Compute G[lineage][db] for each db in BACKGROUND_DBS
+    1.7  Compute G[lineage][db] for each db in BACKGROUND_DBS   [NOT YET IMPLEMENTED]
          for db in BACKGROUND_DBS:
-           for each unitig in E[lineage]:
-             drop if its k-mers appear in F_kmers[db]
+           sbwt lookup -i F_db.sbwt -q E[lineage].fasta -o membership.txt --membership-only
+           for each unitig in E[lineage], read its membership bitvector line:
+             # TODO: same bitvector rule decision as step 1.6, applied against F_db
            write survivors → G[lineage][db].fasta
 
     1.8  (Optional) apply SPECIFICITY_CUTOFF as an additional filter
+         (implemented as part of write_threshold_filtered_fasta's
+         specificity_cutoff parameter — applied alongside core_pct at step 1.4;
+         re-applying as a final pass on G[lineage][db] is not yet implemented)
          keep only unitigs where outside_pct < SPECIFICITY_CUTOFF
-         — can be applied at step 1.4 alongside core_pct, or as a final
-           pass on G[lineage][db]
 
-    1.9  Write per-lineage summary log
-         (unitig counts at each stage: species-wide → C → E → G[db] per db,
-          plus core_pct/outside_pct distribution for QC)
+    1.9  Write per-lineage summary log     [PARTIALLY IMPLEMENTED]
+         (write_threshold_filtered_fasta writes total/kept/dropped counts for
+         the C-building stage via stats_out_path; equivalent logging for
+         E/G stages not yet implemented)
 
 
 STEP 2 — Aggregate outputs
@@ -100,33 +112,27 @@ NOTES ON GENERALISATION
   - Step 1.2 (per-lineage SBWT index) stays optional/config-driven, so the
     GPSC1 benchmark (PAT-3xxx) can validate Fork 1 vs Fork 2 without forcing
     every other lineage to pay the index-build cost.
+  - `sbwt difference` does the heavy, index-native subtraction (F, F_gtdb, D)
+    — this script does not reimplement that. For E and G, this script queries
+    the resulting indexes directly via `sbwt lookup --membership-only` rather
+    than loading a dumped k-mer list into memory — this matters at scale,
+    since F (e.g. ATB minus species) could contain hundreds of millions of
+    k-mers, and loading that into a Python set would reintroduce the same
+    kind of memory blowup the original matrix-script redesign was meant to
+    eliminate.
+
+NOTE ON FILE SCOPE
+  This file (lineage_core_filter.py) contains only the new lineage-core
+  filtering logic. The existing species-exclusion script (used for PAT-3461,
+  producing F via colour-based filtering) stays separate, unchanged, in
+  filter_species_from_atb.py.
 """
 
 import argparse
 import gzip
-import re
 import sys
 from pathlib import Path
-
-
-# numpy boolean vectors:
-"""
-What &, invert(), sum() do
-and explain whyt each is used in their areas etc
-"""
-
-# sbwt lookup --membership-only
-"""
-explore what this comand actually returns.
-A bitvector (one bit per k-mer in your query sequence) in k-mer order along the unitig and not per unitig, per k-mer
-    decide how to collapse that bitvactor into a single keep/drop decision per unitig
-    understand this before passig the loop as it changes what you do with th eoutput
-"""
-
-# where color IDS come from and what they map to
-"""
-Colour IDs in Themisto's colour space aren't inherently meaningful — they only become "genome X" or "lineage Y" via color_names.txt. You need to be clear on the chain: colour_id → filepath → genome accession → GPSC assignment (your existing lookup table). This is currently species-level (find_species_colour_ids) and needs converting to lineage-level — make sure you know exactly where your GPSC-to-genome mapping lives and what format it's in before you start writing find_lineage_colour_ids().
-"""
+import numpy
 
 
 def _open(path):
@@ -196,67 +202,13 @@ def find_lineage_colour_ids(colourid_to_lineage, lineage):
         raise ValueError(f"No colour IDs matched lineage '{lineage}'")
     return matched_ids
 
-def find_species_colour_ids(colour_map_path, species):
+def build_colorset_to_colourids(color_sets_path):
     """
-    Parse color_names.txt and return the set of colour IDs matching `species`.
+    Parse export.color_sets.txt(.gz) into a color_set_id -> [colour_ids] dict.
 
-    color_names.txt lines: "<colour_id>\\t<path>", path like
-    "per_species_unitigs/<genus>_<species>[suffix]-unitigs-k31.fna". Suffix is
-    either an accession/strain tag ("_sp011388195") or a bare shard letter
-    ("streptococcus_pneumoniaea") when ATB splits an oversampled species
-    across multiple colour files.
-
-    Normalises the species name to "genus_species" and matches it against the
-    filename stem, allowing either suffix form.
+    Format per line: "color_set_id=N size=M c1 c2 c3 ..."
     """
-    # normalise "Streptococcus pneumoniae" -> "streptococcus_pneumoniae"
-    normalised_species = "_".join(species.lower().split())
-    # exact match, OR "<species>_<accession/strain>", OR "<species><shard letter>"
-    stem_pattern = re.compile(
-        rf"^{re.escape(normalised_species)}([a-z]|_.+)?$"
-    )
-    matched_ids = set()
-
-    with open(colour_map_path) as fh:
-        for line_num, line in enumerate(fh):
-            line = line.rstrip("\n")
-            if not line:
-                continue
-            parts = line.split("\t")
-            if len(parts) < 2:
-                parts = line.split(None, 1)
-            if len(parts) < 2:
-                print(f"Warning: could not parse line {line_num} in colour map: {line!r}",
-                      file=sys.stderr)
-                continue
-            colour_id_str, path = parts[0], parts[1]
-
-            filename = path.rsplit("/", 1)[-1].lower()  # drop "per_species_unitigs/"
-            # strip the trailing "-unitigs-k31.fna" (or similar) suffix
-            stem = filename.split("-unitigs")[0]
-
-            if stem_pattern.match(stem):
-                matched_ids.add(int(colour_id_str))
-
-    if not matched_ids:
-        raise ValueError(
-            f"No colour IDs matched species '{species}' in {colour_map_path}. "
-            "Check the species name/spelling and the colour map file format."
-        )
-
-    print(f"Matched {len(matched_ids)} colour ID(s) for '{species}': "
-          f"{sorted(matched_ids)[:10]}{'...' if len(matched_ids) > 10 else ''}",
-          file=sys.stderr)
-    return matched_ids
-
-
-def find_excluded_colorsets(color_sets_path, species_colour_ids):
-    """
-    Stream export.color_sets.txt (format: "color_set_id=N size=M c1 c2 c3 ...").
-    Returns the set of color_set_ids whose colour list intersects
-    species_colour_ids — these are the colour sets to exclude.
-    """
-    excluded_colorsets = set()
+    colorset_to_colourids = {}
     with _open(color_sets_path) as fh:
         for line in fh:
             line = line.strip()
@@ -264,50 +216,56 @@ def find_excluded_colorsets(color_sets_path, species_colour_ids):
                 continue
             parts = line.split()
             color_set_id = int(parts[0].split("=")[1])
-            colours = {int(tok) for tok in parts[2:]}  # skip color_set_id=N, size=M
-            if colours & species_colour_ids:
-                excluded_colorsets.add(color_set_id)
-    return excluded_colorsets
+            colour_ids = [int(tok) for tok in parts[2:]]  # skip color_set_id=N, size=M
+            colorset_to_colourids[color_set_id] = colour_ids
+    return colorset_to_colourids
 
-
-# iterate unitigs one at a time mechanism needed. reuse this loop structre, change what happens inside flush()
-# — instead of exclude/retain by colorset membership, you'll be building the boolean vector a and computing core_pct/outside_pct.
-def write_filtered_fasta(unitigs_path, excluded_colorsets, out_path):
+def build_lineage_membership_vector(lineage_colour_ids, n_total_colors):
     """
-    Single streaming pass over export.unitigs.fa, writing out only unitigs
-    whose colour set is NOT in excluded_colorsets.
-
-    Each unitig header already contains its own color_set_id
-    (">unitig_id=N color_set_id=M"), so no separate lookup pass over
-    unitigs.fa is needed before this one — the filter decision is made
-    directly from the header as we stream through.
-
-    Returns (total_unitigs, excluded_count, retained_count).
+    Build a boolean vector of length n_total_colors, True at positions
+    corresponding to genomes belonging to the target lineage.
     """
-    total = 0
-    excluded_count = 0
-    retained_count = 0
+    lineage_membership = numpy.zeros(n_total_colors, dtype=numpy.bool_)
+    lineage_membership[list(lineage_colour_ids)] = True
+    return lineage_membership
 
-    with _open(unitigs_path) as in_fh, _open_out(out_path) as out_fh:
+def iter_unitig_lineage_stats(unitigs_path, colorset_to_colourids, lineage_membership):
+    """
+    Stream export.unitigs.fa one record at a time. For each unitig, look up
+    its colour set (via its color_set_id) and compute:
+      - core_pct    : fraction of lineage genomes where this unitig is present
+      - outside_pct : fraction of non-lineage genomes where this unitig is
+                       also present (specificity / leakage)
+
+    Yields (header, seq, color_set_id, core_pct, outside_pct) per unitig.
+
+    n_total_colors is inferred from lineage_membership's length, since it
+    must match anyway (both index into the same colour space).
+    """
+    n_total_colors = len(lineage_membership)
+    lineage_size = numpy.sum(lineage_membership)
+    outside_size = numpy.sum(numpy.invert(lineage_membership))
+
+    with _open(unitigs_path) as in_fh:
         current_header = None
         current_colorset = None
         current_seq = None
 
-        def flush():
-            nonlocal excluded_count, retained_count
-            if current_header is None:
-                return
-            if current_colorset in excluded_colorsets:
-                excluded_count += 1
-            else:
-                out_fh.write(f">{current_header}\n{current_seq}\n")
-                retained_count += 1
+        def build_stats():
+            colour_ids = colorset_to_colourids[current_colorset]
+            a = numpy.zeros(n_total_colors, dtype=numpy.bool_)
+            a[colour_ids] = True
+
+            core_pct = numpy.sum(a & lineage_membership) / lineage_size
+            outside_pct = numpy.sum(a & numpy.invert(lineage_membership)) / outside_size
+
+            return current_header, current_seq, current_colorset, core_pct, outside_pct
 
         for line in in_fh:
             line = line.rstrip("\n")
             if line.startswith(">"):
-                flush()
-                total += 1
+                if current_header is not None:
+                    yield build_stats()
                 current_header = line[1:].strip()
                 current_colorset = None
                 for tok in current_header.split():
@@ -317,37 +275,103 @@ def write_filtered_fasta(unitigs_path, excluded_colorsets, out_path):
                 current_seq = None
             else:
                 current_seq = line
-        flush()  # last record
 
-    return total, excluded_count, retained_count
+        if current_header is not None:
+            yield build_stats()  # last record
 
+
+
+def write_threshold_filtered_fasta(unitigs_path, colorset_to_colourids,
+                                    lineage_membership, core_threshold,
+                                    specificity_cutoff, out_path,
+                                    stats_out_path=None):
+    """
+    Stream export.unitigs.fa, applying threshold filtering to build C:
+    keep a unitig if its core_pct meets core_threshold, and (optionally)
+    its outside_pct stays below specificity_cutoff.
+
+    core_threshold semantics:
+      - core mode:      core_threshold ~ 0.9-1.0 (present in most/all of lineage)
+      - catch-all mode: core_threshold ~ 0.0-0.1 (present in any/some of lineage)
+    In both modes the same comparison (core_pct >= core_threshold) applies —
+    the caller decides which mode by choosing the threshold value.
+
+    specificity_cutoff is optional (pass None to skip it, keeping this
+    function usable for both "core only" and "core + specificity" filtering
+    without a separate code path).
+
+    Returns (total, kept_count, dropped_count).
+    """
+    total = 0
+    kept_count = 0
+    dropped_count = 0
+
+    with _open_out(out_path) as out_fh:
+        for header, seq, color_set_id, core_pct, outside_pct in iter_unitig_lineage_stats(
+            unitigs_path, colorset_to_colourids, lineage_membership
+        ):
+            total += 1
+
+            passes_core = core_pct >= core_threshold
+            passes_specificity = (
+                specificity_cutoff is None or outside_pct < specificity_cutoff
+            )
+
+            if passes_core and passes_specificity:
+                out_fh.write(f">{header}\n{seq}\n")
+                kept_count += 1
+            else:
+                dropped_count += 1
+
+    if stats_out_path:
+        stats_lines = [
+            f"Total unitigs scanned : {total:,}",
+            f"Kept (C)              : {kept_count:,}",
+            f"Dropped               : {dropped_count:,}",
+            f"Core threshold        : {core_threshold}",
+            f"Specificity cutoff    : {specificity_cutoff}",
+        ]
+        Path(stats_out_path).write_text("\n".join(stats_lines) + "\n")
+
+    return total, kept_count, dropped_count
+
+
+# TODO: E/G computation (steps 1.6/1.7) — blocked on bitvector collapse rule
 
 def main():
     args = parse_args()
 
-    print(f"Looking up colour ID(s) for species: {args.species}", file=sys.stderr)
-    species_colour_ids = find_species_colour_ids(args.colour_map, args.species)
+    print(f"Loading lineage mapping from {args.lineage_mapping} ...", file=sys.stderr)
+    colourid_to_lineage = build_colourid_to_lineage(args.lineage_mapping)
 
-    print("Scanning colour sets for species matches...", file=sys.stderr)
-    excluded_colorsets = find_excluded_colorsets(args.color_sets, species_colour_ids)
-    print(f"  {len(excluded_colorsets):,} colour sets contain '{args.species}'", file=sys.stderr)
+    print(f"Finding colour IDs for lineage '{args.lineage}' ...", file=sys.stderr)
+    lineage_colour_ids = find_lineage_colour_ids(colourid_to_lineage, args.lineage)
+    print(f"  {len(lineage_colour_ids):,} genome(s) in lineage '{args.lineage}'",
+          file=sys.stderr)
 
-    print(f"Writing filtered FASTA to {args.out} ...", file=sys.stderr)
-    total, excluded_count, retained_count = write_filtered_fasta(
-        args.unitigs, excluded_colorsets, args.out
+    print("Building lineage membership vector ...", file=sys.stderr)
+    lineage_membership = build_lineage_membership_vector(
+        lineage_colour_ids, args.n_total_colors
     )
 
-    stats_path = Path(str(args.out).split(".fa")[0] + ".stats.txt")
-    stats_lines = [
-        f"Species excluded        : {args.species}",
-        f"Colour IDs matched       : {sorted(species_colour_ids)}",
-        f"Total unitigs scanned    : {total:,}",
-        f"Unitigs excluded         : {excluded_count:,}",
-        f"Unitigs retained (F)     : {retained_count:,}",
-    ]
-    stats_path.write_text("\n".join(stats_lines) + "\n")
-    for line in stats_lines:
-        print(line)
+    print(f"Parsing colour sets from {args.color_sets} ...", file=sys.stderr)
+    colorset_to_colourids = build_colorset_to_colourids(args.color_sets)
+    print(f"  {len(colorset_to_colourids):,} colour set(s) loaded", file=sys.stderr)
+
+    print(f"Filtering unitigs (core_threshold={args.core_threshold}, "
+          f"specificity_cutoff={args.specificity_cutoff}) ...", file=sys.stderr)
+    total, kept_count, dropped_count = write_threshold_filtered_fasta(
+        unitigs_path=args.unitigs,
+        colorset_to_colourids=colorset_to_colourids,
+        lineage_membership=lineage_membership,
+        core_threshold=args.core_threshold,
+        specificity_cutoff=args.specificity_cutoff,
+        out_path=args.out,
+        stats_out_path=args.stats_out,
+    )
+
+    print(f"Done. Total: {total:,}  Kept (C): {kept_count:,}  "
+          f"Dropped: {dropped_count:,}", file=sys.stderr)
 
 
 if __name__ == "__main__":
