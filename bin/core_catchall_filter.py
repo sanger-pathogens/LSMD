@@ -158,20 +158,40 @@ def _open_out(path):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Exclude a species' k-mers/unitigs from a Themisto-exported background set.",
+        description="Compute per-lineage core presence and outside-lineage "
+                     "specificity for unitigs in a Themisto2-exported species "
+                     "index, then apply a threshold to build a filtered "
+                     "candidate marker set (C).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--unitigs", required=True, type=Path,
-                         help="export.unitigs.fa from Themisto export.")
+                         help="export.unitigs.fa from Themisto2 export "
+                              "(species-wide, colored).")
     parser.add_argument("--color-sets", required=True, type=Path,
-                         help="export.color_sets.txt(.gz) from Themisto export.")
-    parser.add_argument("--colour-map", required=True, type=Path,
-                         help="color_names.txt — colour ID to species/genome name mapping.")
-    parser.add_argument("--species", required=True,
-                         help='Species to exclude, e.g. "Streptococcus pneumoniae". '
-                              "Matched as a case-insensitive substring against colour_map entries.")
+                         help="export.color_sets.txt(.gz) from Themisto2 export.")
+    parser.add_argument("--lineage-mapping", required=True, type=Path,
+                         help="TSV with columns Sample_ID, lineage_id, in the "
+                              "same genome order used at index build time "
+                              "(colour_id = row index, 0-indexed).")
+    parser.add_argument("--n-total-colors", required=True, type=int,
+                         help="Total number of colours/genomes in the species "
+                              "index (from export.metadata.txt's num_colors).")
+    parser.add_argument("--lineage", required=True,
+                         help="Target lineage ID to filter for, e.g. '1' (GPSC1).")
+    parser.add_argument("--core-threshold", required=True, type=float,
+                         help="Minimum core_pct required to keep a unitig. "
+                              "Use ~0.9-1.0 for core mode, ~0.0-0.1 for "
+                              "catch-all mode.")
+    parser.add_argument("--specificity-cutoff", type=float, default=None,
+                         help="Optional maximum outside_pct allowed. If not "
+                              "given, specificity filtering is skipped at "
+                              "this stage.")
     parser.add_argument("--out", required=True, type=Path,
-                         help="Output path for filtered unitig FASTA (F). Use .gz suffix to compress.")
+                         help="Output path for filtered unitig FASTA (C). "
+                              "Use .gz suffix to compress.")
+    parser.add_argument("--stats-out", type=Path, default=None,
+                         help="Optional path to write summary stats "
+                              "(total/kept/dropped counts).")
     return parser.parse_args()
 
 def build_colourid_to_lineage(lineage_mapping_path):
