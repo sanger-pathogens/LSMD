@@ -155,6 +155,19 @@ def _open_out(path):
     path = Path(path)
     return gzip.open(path, "wt") if path.suffix == ".gz" else open(path, "w")
 
+def load_unitig_colorset_ids(index_export_path) -> np.ndarray:
+    colorset_ids = []
+
+    with _open(index_export_path) as f:
+        for line in f:
+            if line.startswith(">"):
+                header = line[1:].strip()
+                fields = dict(
+                    field.split("=") for field in header.split()
+                )
+                colorset_ids.append(int(fields["color_set_id"]))
+
+    return np.array(colorset_ids, dtype=np.int64)
 
 def parse_args():
     parser = argparse.ArgumentParser(
