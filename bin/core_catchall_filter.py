@@ -441,3 +441,7 @@ def threshold_mask(
         return fractions > cutoff
     else:
         raise ValueError(f"unknown mode: {mode!r}")
+
+def validate_threshold_args(args):
+    if args.threshold is not None and not (0.0 <= args.threshold <= 1.0):
+        raise ValueError(f"--threshold must be between 0.0 and 1.0, got {args.threshold}")
