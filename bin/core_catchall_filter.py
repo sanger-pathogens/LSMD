@@ -396,6 +396,16 @@ def main():
 
 if __name__ == "__main__":
     main()
+def parse_args():
+    parser.add_argument(
+        "-m", "--mode",
+        choices=["core", "catchall"],
+        default="core",
+        help="'core': strict, present in 95%% of lineage genomes (override with --threshold). "
+             "'catchall': relaxed, present in >50%% of lineage genomes (override with --threshold).",
+    )
+    parser.add_argument("-t", "--threshold", type=float, default=None,
+        help="Override default cutoff (0.95 core / 0.5 catchall).")
 def threshold_mask(
     fractions: np.ndarray,
     mode: str,
