@@ -396,3 +396,38 @@ def main():
 
 if __name__ == "__main__":
     main()
+def threshold_mask(
+    fractions: np.ndarray,
+    mode: str,
+    threshold: float | None = None,
+) -> np.ndarray:
+    """
+    mode='core':     fractions >= threshold   (default threshold = 0.95)
+                      STRICT — k-mer must be present in ~95%+ of the
+                      lineage's genomes. Near-universal, tolerant of a
+                      small number of dropouts (assembly gaps,
+                      sequencing noise, one-off bad samples).
+
+    mode='relaxed':   fractions >  threshold   (default threshold = 0.5)
+                      MAJORITY — k-mer must be present in >50% of the
+                      lineage's genomes. Includes core + common
+                      accessory content, excludes rare/sporadic k-mers.
+
+    mode='catchall':  fractions >  threshold   (default threshold = 0.0)
+                      ANY — k-mer must be present in at least one
+                      genome of the lineage. Core + all accessory,
+                      no noise floor.
+
+    threshold overrides the default cutoff for any mode.
+    """
+    if mode == "core":
+        cutoff = threshold if threshold is not None else 0.95
+        return fractions >= cutoff
+    elif mode == "relaxed":
+        cutoff = threshold if threshold is not None else 0.5
+        return fractions > cutoff
+    elif mode == "catchall":
+        cutoff = threshold if threshold is not None else 0.0
+        return fractions > cutoff
+    else:
+        raise ValueError(f"unknown mode: {mode!r}")
