@@ -343,8 +343,37 @@ def write_lineage_summary_stats(lineage_id, mode, threshold, total, kept_count,
 
 ##############################################################################
 ### Orchestrate:
-def process_lineage():
-    pass
+
+def process_lineage(
+    lineage_id: str,
+    lineage_map: dict[str, list[int]],
+    n_total_colors: int,
+    colorset_to_colorids: dict[int, list[int]],
+    unitig_colorset_ids: np.ndarray,
+    mode: str,
+    threshold: float | None,
+    out_path,
+    stats_out_path=None,
+):
+    lineage_color_ids = lineage_map[lineage_id]
+    lineage_mask = build_lineage_color_mask(lineage_color_ids, n_total_colors)
+
+    colorset_fractions = compute_colorset_presence_fractions(
+        colorset_to_colorids, lineage_mask
+    )
+    unitig_fractions = map_unitig_fractions(unitig_colorset_ids, colorset_fractions)
+
+    mask = threshold_mask(unitig_fractions, mode, threshold)
+
+    total, kept_count, dropped_count = write_lineage_unitig_ids(mask, out_path)
+
+    if stats_out_path:
+        write_lineage_summary_stats(
+            lineage_id, mode, threshold, total, kept_count, dropped_count,
+            stats_out_path,
+        )
+
+    return total, kept_count, dropped_count
 
 def parse_args():
     parser = argparse.ArgumentParser(
