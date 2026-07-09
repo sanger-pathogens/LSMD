@@ -196,23 +196,6 @@ def load_unitig_colorset_ids(index_export_path) -> np.ndarray:
 
     return np.array(colorset_ids, dtype=np.int64)
 
-def build_colorset_to_colorids(color_sets_path):
-    """
-    Parse export.color_sets.txt(.gz) into a color_set_id -> [color_ids] dict.
-    Format per line: "color_set_id=N size=M c1 c2 c3 ..."
-    """
-    colorset_to_colorids = {}
-    with _open(color_sets_path) as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            parts = line.split()
-            color_set_id = int(parts[0].split("=")[1])
-            color_ids = [int(tok) for tok in parts[2:]]  # skip color_set_id=N, size=M
-            colorset_to_colorids[color_set_id] = color_ids
-    return colorset_to_colorids
-
 def load_lineage_map(lineage_mapping_path) -> dict[str, list[int]]:
     """
     Parse a TSV with columns Sample_ID, lineage_id into a
