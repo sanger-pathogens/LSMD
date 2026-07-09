@@ -315,6 +315,19 @@ def threshold_mask(
 
 ##############################################################################
 ###  Output writing
+def write_lineage_unitig_ids(mask: np.ndarray, out_path):
+    """Write unitig_ids where mask is True to out_path, one per line."""
+    passing_ids = np.nonzero(mask)[0]
+    total = len(mask)
+    kept_count = len(passing_ids)
+    dropped_count = total - kept_count
+
+    with _open_out(out_path) as out_fh:
+        for unitig_id in passing_ids:
+            out_fh.write(f"{unitig_id}\n")
+
+    return total, kept_count, dropped_count
+
 def write_lineage_summary_stats():
     pass
 
