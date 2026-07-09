@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """
 LINEAGE-CORE / CATCH-ALL FILTERING PIPELINE
 (species-agnostic, lineage-agnostic, background-db-agnostic)
@@ -162,6 +163,7 @@ import numpy as np
 
 ##############################################################################
 ### I/O helper
+
 def _open(path):
     path = Path(path)
     if path.exists():
@@ -182,6 +184,7 @@ def _open_out(path):
 
 ##############################################################################
 ### I/O loading
+
 def load_unitig_colorset_ids(index_export_path) -> np.ndarray:
     colorset_ids = []
 
@@ -212,8 +215,10 @@ def load_lineage_map(lineage_mapping_path) -> dict[str, list[int]]:
             sample_id, lineage_id = line.rstrip("\n").split("\t")
             lineage_map.setdefault(lineage_id, []).append(color_id)
     return lineage_map
+
 ##############################################################################
 ### Per-lineage membership and fraction calculations:
+
 def build_lineage_color_mask(lineage_color_ids, n_total_colors) -> np.ndarray:
     """
     Build a boolean vector of length n_total_colors, True at positions
@@ -223,29 +228,64 @@ def build_lineage_color_mask(lineage_color_ids, n_total_colors) -> np.ndarray:
     lineage_mask[lineage_color_ids] = True
     return lineage_mask
 
-def compute_colorset_presence_fractions(
-    colorset_to_colorids: dict[int, list[int]],
-    lineage_mask: np.ndarray,
-) -> dict[int, float]:
+def compute_colorset_fractions_streaming(
+    color_sets_path,
+    lineage_masks: dict[str, np.ndarray],
+) -> dict[str, np.ndarray]:
     """
-    For each unique color_set_id, compute the fraction of the lineage's
-    genomes that contain it:
+    Single streaming pass over export.color_sets.txt(.gz) that computes, for
+    every requested lineage at once, the presence fraction of each
+    color_set_id:
         fraction = |color_set ∩ lineage| / |lineage|
+
+    Unlike parsing the file into a color_set_id -> [color_ids] dict up
+    front, this never retains the per-color_set color_ids beyond the line
+    they came from — only the resulting per-lineage fraction is kept. Peak
+    memory is O(n_colorsets * n_lineages) instead of O(total color_ids in
+    the file).
 
     Returns
     -------
-    dict[int, float]
-        color_set_id -> presence fraction (0.0-1.0)
+    dict[str, np.ndarray]
+        lineage_id -> dense array of presence fractions indexed by
+        color_set_id.
     """
-    lineage_size = np.sum(lineage_mask)
-    if lineage_size == 0:
-        raise ValueError("lineage_mask has zero members — empty lineage?")
+    lineage_sizes = {
+        lineage_id: int(np.sum(mask)) for lineage_id, mask in lineage_masks.items()
+    }
+    for lineage_id, size in lineage_sizes.items():
+        if size == 0:
+            raise ValueError(f"lineage '{lineage_id}' mask has zero members — empty lineage?")
 
-    fractions = {}
-    for color_set_id, color_ids in colorset_to_colorids.items():
-        fractions[color_set_id] = np.sum(lineage_mask[color_ids]) / lineage_size
+    seen_colorset_ids = []
+    fractions_by_lineage = {lineage_id: [] for lineage_id in lineage_masks}
 
-    return fractions
+    with _open(color_sets_path) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split()
+            color_set_id = int(parts[0].split("=")[1])
+            color_ids = np.array(
+                [int(tok) for tok in parts[2:]], dtype=np.int64
+            )  # skip color_set_id=N, size=M; discarded after this iteration
+
+            seen_colorset_ids.append(color_set_id)
+            for lineage_id, mask in lineage_masks.items():
+                fraction = np.sum(mask[color_ids]) / lineage_sizes[lineage_id]
+                fractions_by_lineage[lineage_id].append(fraction)
+
+    colorset_ids_arr = np.array(seen_colorset_ids, dtype=np.int64)
+    max_colorset_id = colorset_ids_arr.max() if len(colorset_ids_arr) else -1
+
+    fraction_arrays = {}
+    for lineage_id, fractions in fractions_by_lineage.items():
+        fraction_array = np.zeros(max_colorset_id + 1, dtype=np.float64)
+        fraction_array[colorset_ids_arr] = np.array(fractions, dtype=np.float64)
+        fraction_arrays[lineage_id] = fraction_array
+
+    return fraction_arrays
     
 def map_unitig_fractions(
     unitig_colorset_ids: np.ndarray,
@@ -255,6 +295,7 @@ def map_unitig_fractions(
 
 ##############################################################################
 ### Thresholding logic
+
 def threshold_mask(
     fractions: np.ndarray,
     mode: str,
@@ -325,22 +366,14 @@ def write_lineage_summary_stats(lineage_id, mode, threshold, total, kept_count,
 
 def process_lineage(
     lineage_id: str,
-    lineage_map: dict[str, list[int]],
-    n_total_colors: int,
-    colorset_to_colorids: dict[int, list[int]],
+    fraction_array: np.ndarray,
     unitig_colorset_ids: np.ndarray,
     mode: str,
     threshold: float | None,
     out_path,
     stats_out_path=None,
 ):
-    lineage_color_ids = lineage_map[lineage_id]
-    lineage_mask = build_lineage_color_mask(lineage_color_ids, n_total_colors)
-
-    colorset_fractions = compute_colorset_presence_fractions(
-        colorset_to_colorids, lineage_mask
-    )
-    unitig_fractions = map_unitig_fractions(unitig_colorset_ids, colorset_fractions)
+    unitig_fractions = map_unitig_fractions(unitig_colorset_ids, fraction_array)
 
     mask = threshold_mask(unitig_fractions, mode, threshold)
 
@@ -429,20 +462,28 @@ def main():
     unitig_colorset_ids = load_unitig_colorset_ids(args.unitigs)
     print(f"  {len(unitig_colorset_ids):,} unitig(s) loaded", file=sys.stderr)
 
-    print(f"Parsing color sets from {args.color_sets} ...", file=sys.stderr)
-    colorset_to_colorids = build_colorset_to_colorids(args.color_sets)
-    print(f"  {len(colorset_to_colorids):,} color set(s) loaded", file=sys.stderr)
-
     print(f"Loading lineage mapping from {args.lineage_mapping} ...", file=sys.stderr)
     lineage_map = load_lineage_map(args.lineage_mapping)
     print(f"  {len(lineage_map):,} lineage(s) found in mapping", file=sys.stderr)
 
+    lineage_masks = {}
     for lineage_id in args.lineages:
         if lineage_id not in lineage_map:
             print(f"WARNING: lineage '{lineage_id}' not found in mapping, skipping",
                   file=sys.stderr)
             continue
+        lineage_masks[lineage_id] = build_lineage_color_mask(
+            lineage_map[lineage_id], args.n_total_colors
+        )
 
+    print(f"Streaming color sets from {args.color_sets} ...", file=sys.stderr)
+    fractions_by_lineage = compute_colorset_fractions_streaming(
+        args.color_sets, lineage_masks
+    )
+    print(f"  presence fractions computed for {len(fractions_by_lineage):,} lineage(s)",
+          file=sys.stderr)
+
+    for lineage_id in lineage_masks:
         out_path = args.out_dir / f"{lineage_id}_{args.mode}_unitig_ids.txt"
         stats_out_path = (
             args.stats_out_dir / f"{lineage_id}_{args.mode}_unitig_ids.txt"
@@ -453,9 +494,7 @@ def main():
               file=sys.stderr)
         total, kept_count, dropped_count = process_lineage(
             lineage_id=lineage_id,
-            lineage_map=lineage_map,
-            n_total_colors=args.n_total_colors,
-            colorset_to_colorids=colorset_to_colorids,
+            fraction_array=fractions_by_lineage[lineage_id],
             unitig_colorset_ids=unitig_colorset_ids,
             mode=args.mode,
             threshold=args.threshold,
