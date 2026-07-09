@@ -315,6 +315,7 @@ def threshold_mask(
 
 ##############################################################################
 ###  Output writing
+
 def write_lineage_unitig_ids(mask: np.ndarray, out_path):
     """Write unitig_ids where mask is True to out_path, one per line."""
     passing_ids = np.nonzero(mask)[0]
@@ -374,6 +375,7 @@ def process_lineage(
         )
 
     return total, kept_count, dropped_count
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Compute per-lineage core presence for unitigs in a "
@@ -488,129 +490,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-##############################################################################
-##############################################################################
-##############################################################################
-### Old version to base new functions on
-
-
-
-def find_lineage_colour_ids(colourid_to_lineage, lineage):
-    """
-    Return the set of colour IDs assigned to `lineage`.
-    """
-    matched_ids = {cid for cid, lin in colourid_to_lineage.items() if lin == lineage}
-    if not matched_ids:
-        raise ValueError(f"No colour IDs matched lineage '{lineage}'")
-    return matched_ids
-
-def iter_unitig_lineage_stats(unitigs_path, colorset_to_colourids, lineage_membership):
-    """
-    Stream export.unitigs.fa one record at a time. For each unitig, look up
-    its colour set (via its color_set_id) and compute:
-      - core_pct    : fraction of lineage genomes where this unitig is present
-      - outside_pct : fraction of non-lineage genomes where this unitig is
-                       also present (specificity / leakage)
-
-    Yields (header, seq, color_set_id, core_pct, outside_pct) per unitig.
-
-    n_total_colors is inferred from lineage_membership's length, since it
-    must match anyway (both index into the same colour space).
-    """
-    n_total_colors = len(lineage_membership)
-    lineage_size = numpy.sum(lineage_membership)
-    outside_size = numpy.sum(numpy.invert(lineage_membership))
-
-    with _open(unitigs_path) as in_fh:
-        current_header = None
-        current_colorset = None
-        current_seq = None
-
-        def build_stats():
-            colour_ids = colorset_to_colourids[current_colorset]
-            a = numpy.zeros(n_total_colors, dtype=numpy.bool_)
-            a[colour_ids] = True
-
-            core_pct = numpy.sum(a & lineage_membership) / lineage_size
-            outside_pct = numpy.sum(a & numpy.invert(lineage_membership)) / outside_size
-
-            return current_header, current_seq, current_colorset, core_pct, outside_pct
-
-        for line in in_fh:
-            line = line.rstrip("\n")
-            if line.startswith(">"):
-                if current_header is not None:
-                    yield build_stats()
-                current_header = line[1:].strip()
-                current_colorset = None
-                for tok in current_header.split():
-                    if tok.startswith("color_set_id="):
-                        current_colorset = int(tok.split("=", 1)[1])
-                        break
-                current_seq = None
-            else:
-                current_seq = line
-
-        if current_header is not None:
-            yield build_stats()  # last record
-
-
-
-def write_threshold_filtered_fasta(unitigs_path, colorset_to_colourids,
-                                    lineage_membership, core_threshold,
-                                    specificity_cutoff, out_path,
-                                    stats_out_path=None):
-    """
-    Stream export.unitigs.fa, applying threshold filtering to build E:
-    keep a unitig if its core_pct meets core_threshold, and (optionally)
-    its outside_pct stays below specificity_cutoff.
-
-    core_threshold semantics:
-      - core mode:      core_threshold ~ 0.9-1.0 (present in most/all of lineage)
-      - catch-all mode: core_threshold ~ 0.0-0.1 (present in any/some of lineage)
-    In both modes the same comparison (core_pct >= core_threshold) applies —
-    the caller decides which mode by choosing the threshold value.
-
-    specificity_cutoff is optional (pass None to skip it, keeping this
-    function usable for both "core only" and "core + specificity" filtering
-    without a separate code path).
-
-    Returns (total, kept_count, dropped_count).
-    """
-    total = 0
-    kept_count = 0
-    dropped_count = 0
-
-    with _open_out(out_path) as out_fh:
-        for header, seq, color_set_id, core_pct, outside_pct in iter_unitig_lineage_stats(
-            unitigs_path, colorset_to_colourids, lineage_membership
-        ):
-            total += 1
-
-            passes_core = core_pct >= core_threshold
-            passes_specificity = (
-                specificity_cutoff is None or outside_pct < specificity_cutoff
-            )
-
-            if passes_core and passes_specificity:
-                out_fh.write(f">{header}\n{seq}\n")
-                kept_count += 1
-            else:
-                dropped_count += 1
-
-    if stats_out_path:
-        stats_lines = [
-            f"Total unitigs scanned : {total:,}",
-            f"Kept (E)              : {kept_count:,}",
-            f"Dropped               : {dropped_count:,}",
-            f"Core threshold        : {core_threshold}",
-            f"Specificity cutoff    : {specificity_cutoff}",
-        ]
-        Path(stats_out_path).write_text("\n".join(stats_lines) + "\n")
-
-    return total, kept_count, dropped_count
-
-
-
-
