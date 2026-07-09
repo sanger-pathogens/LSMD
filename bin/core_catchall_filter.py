@@ -436,8 +436,58 @@ def parse_args():
 def validate_threshold_args(args):
     if args.threshold is not None and not (0.0 <= args.threshold <= 1.0):
         raise ValueError(f"--threshold must be between 0.0 and 1.0, got {args.threshold}")
+
 def main():
-    pass
+    args = parse_args()
+    validate_threshold_args(args)
+
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    if args.stats_out_dir:
+        args.stats_out_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"Loading unitig colorset IDs from {args.unitigs} ...", file=sys.stderr)
+    unitig_colorset_ids = load_unitig_colorset_ids(args.unitigs)
+    print(f"  {len(unitig_colorset_ids):,} unitig(s) loaded", file=sys.stderr)
+
+    print(f"Parsing color sets from {args.color_sets} ...", file=sys.stderr)
+    colorset_to_colorids = build_colorset_to_colorids(args.color_sets)
+    print(f"  {len(colorset_to_colorids):,} color set(s) loaded", file=sys.stderr)
+
+    print(f"Loading lineage mapping from {args.lineage_mapping} ...", file=sys.stderr)
+    lineage_map = load_lineage_map(args.lineage_mapping)
+    print(f"  {len(lineage_map):,} lineage(s) found in mapping", file=sys.stderr)
+
+    for lineage_id in args.lineages:
+        if lineage_id not in lineage_map:
+            print(f"WARNING: lineage '{lineage_id}' not found in mapping, skipping",
+                  file=sys.stderr)
+            continue
+
+        out_path = args.out_dir / f"{lineage_id}_{args.mode}_unitig_ids.txt"
+        stats_out_path = (
+            args.stats_out_dir / f"{lineage_id}_{args.mode}_unitig_ids.txt"
+            if args.stats_out_dir else None
+        )
+
+        print(f"Processing lineage '{lineage_id}' (mode={args.mode}) ...",
+              file=sys.stderr)
+        total, kept_count, dropped_count = process_lineage(
+            lineage_id=lineage_id,
+            lineage_map=lineage_map,
+            n_total_colors=args.n_total_colors,
+            colorset_to_colorids=colorset_to_colorids,
+            unitig_colorset_ids=unitig_colorset_ids,
+            mode=args.mode,
+            threshold=args.threshold,
+            out_path=out_path,
+            stats_out_path=stats_out_path,
+        )
+        print(f"  Total: {total:,}  Kept (E): {kept_count:,}  Dropped: {dropped_count:,}",
+              file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()
 
 ##############################################################################
 ##############################################################################
@@ -562,43 +612,5 @@ def write_threshold_filtered_fasta(unitigs_path, colorset_to_colourids,
     return total, kept_count, dropped_count
 
 
-def main():
-    args = parse_args()
-
-    print(f"Loading lineage mapping from {args.lineage_mapping} ...", file=sys.stderr)
-    colourid_to_lineage = build_colourid_to_lineage(args.lineage_mapping)
-
-    print(f"Finding colour IDs for lineage '{args.lineage}' ...", file=sys.stderr)
-    lineage_colour_ids = find_lineage_colour_ids(colourid_to_lineage, args.lineage)
-    print(f"  {len(lineage_colour_ids):,} genome(s) in lineage '{args.lineage}'",
-          file=sys.stderr)
-
-    print("Building lineage membership vector ...", file=sys.stderr)
-    lineage_membership = build_lineage_membership_vector(
-        lineage_colour_ids, args.n_total_colors
-    )
-
-    print(f"Parsing colour sets from {args.color_sets} ...", file=sys.stderr)
-    colorset_to_colourids = build_colorset_to_colourids(args.color_sets)
-    print(f"  {len(colorset_to_colourids):,} colour set(s) loaded", file=sys.stderr)
-
-    print(f"Filtering unitigs (core_threshold={args.core_threshold}, "
-          f"specificity_cutoff={args.specificity_cutoff}) ...", file=sys.stderr)
-    total, kept_count, dropped_count = write_threshold_filtered_fasta(
-        unitigs_path=args.unitigs,
-        colorset_to_colourids=colorset_to_colourids,
-        lineage_membership=lineage_membership,
-        core_threshold=args.core_threshold,
-        specificity_cutoff=args.specificity_cutoff,
-        out_path=args.out,
-        stats_out_path=args.stats_out,
-    )
-
-    print(f"Done. Total: {total:,}  Kept (E): {kept_count:,}  "
-          f"Dropped: {dropped_count:,}", file=sys.stderr)
-
-
-if __name__ == "__main__":
-    main()
 
 
