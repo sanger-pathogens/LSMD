@@ -158,7 +158,7 @@ import argparse
 import gzip
 import sys
 from pathlib import Path
-import numpy
+import numpy as np
 
 ##############################################################################
 ### I/O helper
@@ -239,8 +239,31 @@ def build_lineage_color_mask(lineage_color_ids, n_total_colors) -> np.ndarray:
     lineage_mask = np.zeros(n_total_colors, dtype=np.bool_)
     lineage_mask[lineage_color_ids] = True
     return lineage_mask
-def compute_colorset_presence_fractions():
-    pass
+
+def compute_colorset_presence_fractions(
+    colorset_to_colorids: dict[int, list[int]],
+    lineage_mask: np.ndarray,
+) -> dict[int, float]:
+    """
+    For each unique color_set_id, compute the fraction of the lineage's
+    genomes that contain it:
+        fraction = |color_set ∩ lineage| / |lineage|
+
+    Returns
+    -------
+    dict[int, float]
+        color_set_id -> presence fraction (0.0-1.0)
+    """
+    lineage_size = np.sum(lineage_mask)
+    if lineage_size == 0:
+        raise ValueError("lineage_mask has zero members — empty lineage?")
+
+    fractions = {}
+    for color_set_id, color_ids in colorset_to_colorids.items():
+        fractions[color_set_id] = np.sum(lineage_mask[color_ids]) / lineage_size
+
+    return fractions
+    
 def map_unitig_fractions():
     pass
 
