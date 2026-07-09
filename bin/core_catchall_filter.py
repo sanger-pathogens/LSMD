@@ -213,8 +213,22 @@ def build_colorset_to_colorids(color_sets_path):
             colorset_to_colorids[color_set_id] = color_ids
     return colorset_to_colorids
 
-def load_lineage_map():
-    pass
+def load_lineage_map(lineage_mapping_path) -> dict[str, list[int]]:
+    """
+    Parse a TSV with columns Sample_ID, lineage_id into a
+    lineage_id -> [color_ids] dict.
+
+    color_id is 0-indexed and equals the row's position in the file
+    (header on line 1, data starts line 2), matching the build-time
+    genome order used for color ID assignment.
+    """
+    lineage_map: dict[str, list[int]] = {}
+    with _open(lineage_mapping_path) as fh:
+        next(fh)  # skip header row
+        for color_id, line in enumerate(fh):
+            sample_id, lineage_id = line.rstrip("\n").split("\t")
+            lineage_map.setdefault(lineage_id, []).append(color_id)
+    return lineage_map
 ##############################################################################
 ### Per-lineage membership and fraction calculations:
 def build_lineage_color_mask():
@@ -329,23 +343,7 @@ def main():
 ##############################################################################
 ##############################################################################
 ### Old version to base new functions on
-def build_colourid_to_lineage(lineage_mapping_path):
-    """
-    Build a mapping of colour_id -> lineage_id from a TSV file with columns:
-      Sample_ID, lineage_id
 
-    Colour IDs are always 0-indexed (Themisto2/SBWT convention), matching
-    the row order of `lineage_mapping_path`, which has been confirmed to
-    mirror the build-time genome order used for colour ID assignment.
-    (header on line 1, data starts line 2 -> colour_id = row_index)
-    """
-    colourid_to_lineage = {}
-    with open(lineage_mapping_path) as fh:
-        next(fh)  # skip header row
-        for colour_id, line in enumerate(fh):
-            sample_id, lineage = line.rstrip("\n").split("\t")
-            colourid_to_lineage[colour_id] = lineage
-    return colourid_to_lineage
 
 
 def find_lineage_colour_ids(colourid_to_lineage, lineage):
@@ -356,24 +354,6 @@ def find_lineage_colour_ids(colourid_to_lineage, lineage):
     if not matched_ids:
         raise ValueError(f"No colour IDs matched lineage '{lineage}'")
     return matched_ids
-
-def build_colorset_to_colourids(color_sets_path):
-    """
-    Parse export.color_sets.txt(.gz) into a color_set_id -> [colour_ids] dict.
-
-    Format per line: "color_set_id=N size=M c1 c2 c3 ..."
-    """
-    colorset_to_colourids = {}
-    with _open(color_sets_path) as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            parts = line.split()
-            color_set_id = int(parts[0].split("=")[1])
-            colour_ids = [int(tok) for tok in parts[2:]]  # skip color_set_id=N, size=M
-            colorset_to_colourids[color_set_id] = colour_ids
-    return colorset_to_colourids
 
 def build_lineage_membership_vector(lineage_colour_ids, n_total_colors):
     """
