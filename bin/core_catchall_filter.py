@@ -231,8 +231,14 @@ def load_lineage_map(lineage_mapping_path) -> dict[str, list[int]]:
     return lineage_map
 ##############################################################################
 ### Per-lineage membership and fraction calculations:
-def build_lineage_color_mask():
-    pass
+def build_lineage_color_mask(lineage_color_ids, n_total_colors) -> np.ndarray:
+    """
+    Build a boolean vector of length n_total_colors, True at positions
+    corresponding to genomes belonging to the target lineage.
+    """
+    lineage_mask = np.zeros(n_total_colors, dtype=np.bool_)
+    lineage_mask[lineage_color_ids] = True
+    return lineage_mask
 def compute_colorset_presence_fractions():
     pass
 def map_unitig_fractions():
@@ -354,15 +360,6 @@ def find_lineage_colour_ids(colourid_to_lineage, lineage):
     if not matched_ids:
         raise ValueError(f"No colour IDs matched lineage '{lineage}'")
     return matched_ids
-
-def build_lineage_membership_vector(lineage_colour_ids, n_total_colors):
-    """
-    Build a boolean vector of length n_total_colors, True at positions
-    corresponding to genomes belonging to the target lineage.
-    """
-    lineage_membership = numpy.zeros(n_total_colors, dtype=numpy.bool_)
-    lineage_membership[list(lineage_colour_ids)] = True
-    return lineage_membership
 
 def iter_unitig_lineage_stats(unitigs_path, colorset_to_colourids, lineage_membership):
     """
