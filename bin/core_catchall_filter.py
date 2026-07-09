@@ -249,13 +249,8 @@ def compute_colorset_presence_fractions(
     
 def map_unitig_fractions(
     unitig_colorset_ids: np.ndarray,
-    colorset_fractions: dict[int, float],
+    fraction_array: np.ndarray,
 ) -> np.ndarray:
-    max_colorset_id = max(colorset_fractions.keys())
-    fraction_array = np.zeros(max_colorset_id + 1, dtype=np.float64)
-    for color_set_id, fraction in colorset_fractions.items():
-        fraction_array[color_set_id] = fraction
-
     return fraction_array[unitig_colorset_ids]
 
 ##############################################################################
