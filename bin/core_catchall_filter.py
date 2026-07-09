@@ -1,130 +1,156 @@
 #!/usr/bin/env python3
 """
-GENERALISED LINEAGE-CORE FILTERING PLAN
+LINEAGE-CORE / CATCH-ALL FILTERING PIPELINE
 (species-agnostic, lineage-agnostic, background-db-agnostic)
 
+Builds a lineage-specific marker k-mer set (unitigs) for a target lineage
+within a target species, refined so the markers are specific both within
+the species (not shared with other lineages) and against the wider genomic
+background (not shared with large external reference collections such as
+ATB or GTDB).
+
+
+TERMINOLOGY
+  species-agnostic       A step's logic doesn't reference any specific
+                          species by name — the target species is entirely
+                          defined by the SPECIES_INDEX parameter passed in.
+  lineage-agnostic        Same, for lineage — no lineage ID is hardcoded,
+                          all lineage specifics come from LINEAGE_LIST /
+                          LINEAGE_MAP.
+  background-db-agnostic  The pipeline doesn't care which reference database
+                          (ATB, GTDB, or any future db) is used as
+                          background — any db can be plugged in via
+                          BACKGROUND_DBS without code changes.
+  index-native            The operation is performed directly by the SBWT /
+                          Themisto2 CLI tools on a real k-mer index (e.g.
+                          via `sbwt difference`), not derived in Python.
+  Python-derived          The object was built in this script via boolean-
+                          vector arithmetic over colour-set membership
+                          (cheap, avoids building an intermediate index),
+                          and is therefore NOT a real SBWT/Themisto2 index
+                          until it is explicitly rebuilt as one.
+
+
 Parameters (passed in, never hardcoded):
-  SPECIES_INDEX     = combined SBWT/Themisto index for target species
-                       (e.g. S. pneumoniae combined index, unitigs + colors)
-  LINEAGE_LIST       = list of lineage IDs to process (e.g. all GPSCs of interest)
-  LINEAGE_MAP        = mapping of lineage ID -> list of genome/color IDs
+  SPECIES_INDEX       = combined SBWT/Themisto index for target species
+                        (e.g. S. pneumoniae combined index, unitigs + colors)
+  LINEAGE_LIST        = list of lineage IDs to process (e.g. all GPSCs of interest)
+  LINEAGE_MAP         = mapping of lineage ID -> list of genome/color IDs
   BACKGROUND_DBS      = list of background reference indexes to check against
-                       (e.g. [ATB, GTDB] — extensible to any future db)
+                        (e.g. [ATB, GTDB] — extensible to any future db)
   CORE_THRESHOLD      = core presence cutoff (e.g. 0.9 for "core", 0.0-0.1 for "catch-all")
   SPECIFICITY_CUTOFF  = max allowed presence outside lineage (e.g. 0.1)
 
 
-STEP 0 — One-time setup (runs once, not per lineage)
-  0.1  Load SPECIES_INDEX metadata (total genome/color count, color ID list)
-  0.2  For each db in BACKGROUND_DBS:
-         confirm db SBWT index exists / is built
-         (if not, block — this is the GTDB-style dependency)
-  0.3  Build A = species-wide k-mer set (already built once, reused for all lineages)
-  0.4  For each db in BACKGROUND_DBS:
-         F[db] = sbwt difference db.sbwt A.sbwt -o F_db.sbwt
-         dump F[db] k-mers via sbwt dump-kmers  →  F_kmers[db]
-         (these are species-agnostic backgrounds, built once, reused for every lineage)
+DEFINITIONS (A -> G, in the order they appear in the pipeline)
+
+  A        = species-wide SBWT/Themisto2 index — all genomes of the target
+             species, colored. Input, built once, reused for every lineage.
+
+  B        = per-lineage SBWT index — the subset of A restricted to one
+             lineage's genomes. Input; only built if doing an index-native
+             D (Step 2) — otherwise B is just the lineage's colour IDs
+             within A, no separate index required.
+
+  ATB/GTDB = background reference SBWT indexes, built independently from
+             large external genome collections (Themisto2-exported
+             unitigs). Not derived from A or B.
+
+  C        = ATB − A   (and C_gtdb = GTDB − A)
+             "background exclusion set" — k-mers/unitigs that exist in the
+             wider world but are NOT part of the target species at all.
+             Species-agnostic: depends only on A, not on any lineage, so
+             it's computed once per run and reused across every lineage.
+
+  D        = A − B
+             "cross-lineage background" — k-mers/unitigs found somewhere
+             else in the species but NOT in this lineage. Per-lineage,
+             index-native.
+
+  E        = threshold-filtered candidates from B
+             "lineage-core / catch-all candidates" — unitigs kept because
+             their presence across the lineage's own genomes crosses
+             CORE_THRESHOLD (~0.9-1.0 for "core" mode, ~0.0-0.1 for
+             "catch-all" mode). Built in Python from a boolean colour-
+             membership vector, per lineage — Python-derived, not yet a
+             real index. THIS SCRIPT'S OUTPUT STOPS HERE.
+
+  F        = E − D   (computed after rebuilding E as a real index — Step 4a)
+             "candidate lineage-specific k-mers" — E's candidates with
+             anything that also occurs in other lineages of the same
+             species (D) removed. Confirms specificity WITHIN the species.
+
+  G        = F − C   (and G_gtdb = F − C_gtdb)
+             "candidate lineage-specific AND background-specific k-mers" —
+             F's candidates with anything that also occurs in the wider
+             background database (ATB / GTDB) removed. Confirms
+             specificity against the outside world, not just within the
+             species. THIS IS THE FINAL OUTPUT: the lineage marker set.
 
 
-STEP 1 — Per-lineage loop (repeat for each lineage in LINEAGE_LIST)
+PIPELINE — four steps, in order
 
-  for lineage in LINEAGE_LIST:
+  Step 1 — Background exclusion (species-agnostic, computed once)
+    C      = ATB  − A     [sbwt difference ATB.sbwt  A.sbwt -o C.sbwt]
+    C_gtdb = GTDB − A     [sbwt difference GTDB.sbwt A.sbwt -o C_gtdb.sbwt]
+    Runs once per pipeline run, independent of lineage — reused for every
+    lineage processed afterwards.
 
-    1.1  Build lineage_membership boolean vector
-         (implemented: build_colourid_to_lineage, find_lineage_colour_ids,
-         build_lineage_membership_vector)
-         lineage_membership = numpy.zeros(n_total_colors, dtype=bool)
-         lineage_membership[LINEAGE_MAP[lineage]] = True
+  Step 2 — Cross-lineage background (per lineage, index-native)
+    D = A − B             [sbwt difference A.sbwt B.sbwt -o D.sbwt]
+    Only needed if doing an index-native D for benchmarking/validation
+    (see GPSC1 benchmark ticket). A Python-derived version of D can be
+    computed from the same boolean-vector logic used to build E (Step 3),
+    but that is benchmark-only, valid only at the threshold=100% boundary.
 
-    1.2  (Optional, per lineage) Build B as real SBWT index
-         — only if doing an SBWT-native D for benchmarking/validation
-         — otherwise skip; D computed in Python at step 1.5
+  Step 3 — Lineage-core / catch-all threshold candidates (per lineage,
+           Python, boolean vector — THIS SCRIPT'S SCOPE)
+    E = threshold-filtered B unitigs
+        (core mode: CORE_THRESHOLD ~0.9-1.0; catch-all mode: ~0.0-0.1;
+         via sum(a & lineage_membership) / sum(lineage_membership))
+    This script (core_catchall_filter.py) writes E's surviving unitigs to
+    a FASTA and stops. Everything in Step 4 happens outside this file.
 
-    1.3  Iterate SPECIES_INDEX unitigs one at a time
-         (implemented: build_colorset_to_colourids, iter_unitig_lineage_stats)
-         for each unitig:
-           parse header → get color_set_id → look up colour set →
-           build boolean vector `a`
-
-           core_pct    = sum(a & lineage_membership) / sum(lineage_membership)
-           outside_pct = sum(a & numpy.invert(lineage_membership)) / sum(numpy.invert(lineage_membership))
-
-    1.4  Apply threshold → build C[lineage]
-         (implemented: write_threshold_filtered_fasta)
-         keep unitig if core_pct >= CORE_THRESHOLD
-         (run twice per lineage if both core and catch-all modes are needed:
-          CORE_THRESHOLD = 0.9-1.0 for core mode
-          CORE_THRESHOLD = 0.0-0.1 for catch-all mode)
-         write passing unitigs to C[lineage].fasta
-
-    1.5  Compute D[lineage] = species-wide minus this lineage
-         — SBWT-native (standard path):
-             sbwt difference A.sbwt B_lineage.sbwt -o D_lineage.sbwt
-             (queried directly via sbwt lookup in step 1.6, no dump-kmers needed)
-         — Python-native version is BENCHMARK-ONLY (see GPSC1 benchmark ticket),
-           only meaningful when compared at the threshold=100% boundary:
-             for each unitig in SPECIES_INDEX:
-               in_D = a & numpy.invert(lineage_membership)
-
-    1.6  Compute E[lineage] = C[lineage] − D[lineage]     [NOT YET IMPLEMENTED]
-         sbwt lookup -i D_lineage.sbwt -q C[lineage].fasta -o membership.txt --membership-only
-         for each unitig in C[lineage], read its membership bitvector line:
-           # TODO (decide when writing this step): exact keep/drop rule from
-           # the bitvector — e.g. drop if ANY bit is 1 (strict), or drop if
-           # >X% of bits are 1 (lenient). Not yet decided.
-         write survivors → E[lineage].fasta
-
-    1.7  Compute G[lineage][db] for each db in BACKGROUND_DBS   [NOT YET IMPLEMENTED]
-         for db in BACKGROUND_DBS:
-           sbwt lookup -i F_db.sbwt -q E[lineage].fasta -o membership.txt --membership-only
-           for each unitig in E[lineage], read its membership bitvector line:
-             # TODO: same bitvector rule decision as step 1.6, applied against F_db
-           write survivors → G[lineage][db].fasta
-
-    1.8  (Optional) apply SPECIFICITY_CUTOFF as an additional filter
-         (implemented as part of write_threshold_filtered_fasta's
-         specificity_cutoff parameter — applied alongside core_pct at step 1.4;
-         re-applying as a final pass on G[lineage][db] is not yet implemented)
-         keep only unitigs where outside_pct < SPECIFICITY_CUTOFF
-
-    1.9  Write per-lineage summary log     [PARTIALLY IMPLEMENTED]
-         (write_threshold_filtered_fasta writes total/kept/dropped counts for
-         the C-building stage via stats_out_path; equivalent logging for
-         E/G stages not yet implemented)
+  Step 4 — Candidate refinement (rebuild + index-native diff, external)
+    4a. Rebuild E's unitig FASTA into a real SBWT + Themisto2 index
+        (E.sbwt). Necessary because E is Python-derived (Step 3), not a
+        native index — it has to become one before it can be diffed
+        index-natively.
+    4b. F      = E − D      [sbwt difference E.sbwt D.sbwt -o F.sbwt]
+    4c. G      = F − C      [sbwt difference F.sbwt C.sbwt -o G.sbwt]
+        G_gtdb = F − C_gtdb [sbwt difference F.sbwt C_gtdb.sbwt -o G_gtdb.sbwt]
 
 
-STEP 2 — Aggregate outputs
-  2.1  Collate G[lineage][db] for all lineages × all backgrounds into final
-       candidate marker set per lineage
-  2.2  Reassemble into unitig FASTAs for LexicMap validation (existing PAT-3432)
-  2.3  Compile summary stats across all lineages for sprint reporting
+OPEN QUESTION
+  Whether G_gtdb replaces, supplements, or runs parallel to G (the
+  ATB-only result) is not yet decided — i.e. whether GTDB should be
+  checked instead of, in addition to, or independently from ATB. This is
+  a scope question, not an implementation detail.
 
 
 NOTES ON GENERALISATION
-  - Nothing above references "S. pneumoniae," "GPSC," "ATB," or "GTDB" by name —
-    all species/lineage/db specifics live in SPECIES_INDEX, LINEAGE_LIST,
-    LINEAGE_MAP, and BACKGROUND_DBS, passed as parameters/config.
-  - Adding a new background db (e.g. a third reference beyond ATB/GTDB) only
-    requires adding it to BACKGROUND_DBS — steps 0.4 and 1.7 loop over it
-    automatically, no code changes needed.
+  - Nothing above references "S. pneumoniae," "GPSC," "ATB," or "GTDB" by
+    name — all species/lineage/db specifics live in SPECIES_INDEX,
+    LINEAGE_LIST, LINEAGE_MAP, and BACKGROUND_DBS, passed as
+    parameters/config.
+  - Adding a new background db (e.g. a third reference beyond ATB/GTDB)
+    only requires adding it to BACKGROUND_DBS — Steps 1 and 4c loop over
+    it automatically, no code changes needed.
   - Adding a new target species requires only a new SPECIES_INDEX and its
     own LINEAGE_LIST/LINEAGE_MAP — same script, same logic.
-  - Step 1.2 (per-lineage SBWT index) stays optional/config-driven, so the
-    GPSC1 benchmark (PAT-3xxx) can validate Fork 1 vs Fork 2 without forcing
-    every other lineage to pay the index-build cost.
-  - `sbwt difference` does the heavy, index-native subtraction (F, F_gtdb, D)
-    — this script does not reimplement that. For E and G, this script queries
-    the resulting indexes directly via `sbwt lookup --membership-only` rather
-    than loading a dumped k-mer list into memory — this matters at scale,
-    since F (e.g. ATB minus species) could contain hundreds of millions of
-    k-mers, and loading that into a Python set would reintroduce the same
-    kind of memory blowup the original matrix-script redesign was meant to
-    eliminate.
+  - `sbwt difference` does the heavy, index-native subtraction (C, D, F, G)
+    — this script does not reimplement that. It only builds E.
 
-NOTE ON FILE SCOPE
-  This file (lineage_core_filter.py) contains only the new lineage-core
-  filtering logic. The existing species-exclusion script (used for PAT-3461,
-  producing F via colour-based filtering) stays separate, unchanged, in
+
+NOTE ON FILE SCOPE / CURRENT STATUS
+  This file (core_catchall_filter.py) contains only the Step 3 logic:
+  computing per-lineage core/outside presence and writing the
+  threshold-filtered candidate set E. Steps 1, 2, and 4 (all native
+  `sbwt difference` calls, plus the Step 4a index rebuild) are not
+  implemented here and are not planned to be — they run as separate
+  CLI/sbwt/Themisto2 commands outside this script.
+  The existing species-exclusion script (used for PAT-3461, producing C
+  via colour-based filtering) stays separate, unchanged, in
   filter_species_from_atb.py.
 """
 
@@ -134,10 +160,9 @@ import sys
 from pathlib import Path
 import numpy
 
-
+##############################################################################
+### I/O helper
 def _open(path):
-    """Open a file for reading, auto-detecting gzip regardless of the given path suffix.
-    (Verbatim from build_kmer_matrix.py.)"""
     path = Path(path)
     if path.exists():
         return gzip.open(path, "rt") if path.suffix == ".gz" else open(path)
@@ -155,6 +180,8 @@ def _open_out(path):
     path = Path(path)
     return gzip.open(path, "wt") if path.suffix == ".gz" else open(path, "w")
 
+##############################################################################
+### I/O loading
 def load_unitig_colorset_ids(index_export_path) -> np.ndarray:
     colorset_ids = []
 
@@ -169,12 +196,77 @@ def load_unitig_colorset_ids(index_export_path) -> np.ndarray:
 
     return np.array(colorset_ids, dtype=np.int64)
 
+def build_colorset_to_colorids():
+    pass
+
+def load_lineage_map():
+    pass
+##############################################################################
+### Per-lineage membership and fraction calculations:
+def build_lineage_color_mask():
+    pass
+def compute_colorset_presence_fractions():
+    pass
+def map_unitig_fractions():
+    pass
+
+##############################################################################
+### Thresholding logic
+def threshold_mask(
+    fractions: np.ndarray,
+    mode: str,
+    threshold: float | None = None,
+) -> np.ndarray:
+    """
+    mode='core':     fractions >= threshold   (default threshold = 0.95)
+                      STRICT — k-mer must be present in ~95%+ of the
+                      lineage's genomes. Near-universal, tolerant of a
+                      small number of dropouts (assembly gaps,
+                      sequencing noise, one-off bad samples).
+
+    mode='relaxed':   fractions >  threshold   (default threshold = 0.5)
+                      MAJORITY — k-mer must be present in >50% of the
+                      lineage's genomes. Includes core + common
+                      accessory content, excludes rare/sporadic k-mers.
+
+    mode='catchall':  fractions >  threshold   (default threshold = 0.0)
+                      ANY — k-mer must be present in at least one
+                      genome of the lineage. Core + all accessory,
+                      no noise floor.
+
+    threshold overrides the default cutoff for any mode.
+    """
+    if mode == "core":
+        cutoff = threshold if threshold is not None else 0.95
+        return fractions >= cutoff
+    elif mode == "relaxed":
+        cutoff = threshold if threshold is not None else 0.5
+        return fractions > cutoff
+    elif mode == "catchall":
+        cutoff = threshold if threshold is not None else 0.0
+        return fractions > cutoff
+    else:
+        raise ValueError(f"unknown mode: {mode!r}")
+
+def validate_threshold_args(args):
+    if args.threshold is not None and not (0.0 <= args.threshold <= 1.0):
+        raise ValueError(f"--threshold must be between 0.0 and 1.0, got {args.threshold}")
+##############################################################################
+###  Output writing
+def write_lineage_summary_stats():
+    pass
+
+##############################################################################
+### Orchestrate:
+def process_lineage():
+    pass
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Compute per-lineage core presence and outside-lineage "
                      "specificity for unitigs in a Themisto2-exported species "
                      "index, then apply a threshold to build a filtered "
-                     "candidate marker set (C).",
+                     "candidate marker set (E).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--unitigs", required=True, type=Path,
@@ -200,13 +292,31 @@ def parse_args():
                               "given, specificity filtering is skipped at "
                               "this stage.")
     parser.add_argument("--out", required=True, type=Path,
-                         help="Output path for filtered unitig FASTA (C). "
+                         help="Output path for filtered unitig FASTA (E). "
                               "Use .gz suffix to compress.")
     parser.add_argument("--stats-out", type=Path, default=None,
                          help="Optional path to write summary stats "
                               "(total/kept/dropped counts).")
+    parser.add_argument("-m", "--mode", 
+                         choices=["core", "catchall"],
+                         default="core",
+                         help="'core': strict, present in 95%% of lineage genomes (override with --threshold). "
+                              "'catchall': relaxed, present in >50%% of lineage genomes (override with --threshold).",)
+    parser.add_argument("-t", "--threshold", 
+                         type=float, 
+                         default=None,
+                         help="Override default cutoff (0.95 core / 0.5 catchall).")
     return parser.parse_args()
 
+def validate_threshold_args():
+    pass
+def main():
+    pass
+
+##############################################################################
+##############################################################################
+##############################################################################
+### Old version to base new functions on
 def build_colourid_to_lineage(lineage_mapping_path):
     """
     Build a mapping of colour_id -> lineage_id from a TSV file with columns:
@@ -319,7 +429,7 @@ def write_threshold_filtered_fasta(unitigs_path, colorset_to_colourids,
                                     specificity_cutoff, out_path,
                                     stats_out_path=None):
     """
-    Stream export.unitigs.fa, applying threshold filtering to build C:
+    Stream export.unitigs.fa, applying threshold filtering to build E:
     keep a unitig if its core_pct meets core_threshold, and (optionally)
     its outside_pct stays below specificity_cutoff.
 
@@ -359,7 +469,7 @@ def write_threshold_filtered_fasta(unitigs_path, colorset_to_colourids,
     if stats_out_path:
         stats_lines = [
             f"Total unitigs scanned : {total:,}",
-            f"Kept (C)              : {kept_count:,}",
+            f"Kept (E)              : {kept_count:,}",
             f"Dropped               : {dropped_count:,}",
             f"Core threshold        : {core_threshold}",
             f"Specificity cutoff    : {specificity_cutoff}",
@@ -368,8 +478,6 @@ def write_threshold_filtered_fasta(unitigs_path, colorset_to_colourids,
 
     return total, kept_count, dropped_count
 
-
-# TODO: E/G computation (steps 1.6/1.7) — blocked on bitvector collapse rule
 
 def main():
     args = parse_args()
@@ -403,58 +511,11 @@ def main():
         stats_out_path=args.stats_out,
     )
 
-    print(f"Done. Total: {total:,}  Kept (C): {kept_count:,}  "
+    print(f"Done. Total: {total:,}  Kept (E): {kept_count:,}  "
           f"Dropped: {dropped_count:,}", file=sys.stderr)
 
 
 if __name__ == "__main__":
     main()
-def parse_args():
-    parser.add_argument(
-        "-m", "--mode",
-        choices=["core", "catchall"],
-        default="core",
-        help="'core': strict, present in 95%% of lineage genomes (override with --threshold). "
-             "'catchall': relaxed, present in >50%% of lineage genomes (override with --threshold).",
-    )
-    parser.add_argument("-t", "--threshold", type=float, default=None,
-        help="Override default cutoff (0.95 core / 0.5 catchall).")
-def threshold_mask(
-    fractions: np.ndarray,
-    mode: str,
-    threshold: float | None = None,
-) -> np.ndarray:
-    """
-    mode='core':     fractions >= threshold   (default threshold = 0.95)
-                      STRICT — k-mer must be present in ~95%+ of the
-                      lineage's genomes. Near-universal, tolerant of a
-                      small number of dropouts (assembly gaps,
-                      sequencing noise, one-off bad samples).
 
-    mode='relaxed':   fractions >  threshold   (default threshold = 0.5)
-                      MAJORITY — k-mer must be present in >50% of the
-                      lineage's genomes. Includes core + common
-                      accessory content, excludes rare/sporadic k-mers.
 
-    mode='catchall':  fractions >  threshold   (default threshold = 0.0)
-                      ANY — k-mer must be present in at least one
-                      genome of the lineage. Core + all accessory,
-                      no noise floor.
-
-    threshold overrides the default cutoff for any mode.
-    """
-    if mode == "core":
-        cutoff = threshold if threshold is not None else 0.95
-        return fractions >= cutoff
-    elif mode == "relaxed":
-        cutoff = threshold if threshold is not None else 0.5
-        return fractions > cutoff
-    elif mode == "catchall":
-        cutoff = threshold if threshold is not None else 0.0
-        return fractions > cutoff
-    else:
-        raise ValueError(f"unknown mode: {mode!r}")
-
-def validate_threshold_args(args):
-    if args.threshold is not None and not (0.0 <= args.threshold <= 1.0):
-        raise ValueError(f"--threshold must be between 0.0 and 1.0, got {args.threshold}")
