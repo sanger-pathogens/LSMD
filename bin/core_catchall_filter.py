@@ -328,8 +328,18 @@ def write_lineage_unitig_ids(mask: np.ndarray, out_path):
 
     return total, kept_count, dropped_count
 
-def write_lineage_summary_stats():
-    pass
+def write_lineage_summary_stats(lineage_id, mode, threshold, total, kept_count,
+                                 dropped_count, stats_out_path):
+    """Write a summary of one lineage+mode run to stats_out_path."""
+    stats_lines = [
+        f"Lineage               : {lineage_id}",
+        f"Mode                  : {mode}",
+        f"Threshold             : {threshold}",
+        f"Total unitigs scanned : {total:,}",
+        f"Kept (E)              : {kept_count:,}",
+        f"Dropped               : {dropped_count:,}",
+    ]
+    Path(stats_out_path).write_text("\n".join(stats_lines) + "\n")
 
 ##############################################################################
 ### Orchestrate:
