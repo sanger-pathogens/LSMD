@@ -374,52 +374,63 @@ def process_lineage(
         )
 
     return total, kept_count, dropped_count
-
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Compute per-lineage core presence and outside-lineage "
-                     "specificity for unitigs in a Themisto2-exported species "
-                     "index, then apply a threshold to build a filtered "
-                     "candidate marker set (E).",
+        description="Compute per-lineage core presence for unitigs in a "
+                     "Themisto2-exported species index, then apply a "
+                     "threshold to build a filtered candidate marker set "
+                     "(E), written as unitig_id lists.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--unitigs", required=True, type=Path,
-                         help="export.unitigs.fa from Themisto2 export "
-                              "(species-wide, colored).")
+                         help="export.unitigs.fa(.gz) from Themisto2 export "
+                              "(species-wide, colored). Used to derive "
+                              "unitig_colorset_ids.")
     parser.add_argument("--color-sets", required=True, type=Path,
-                         help="export.color_sets.txt(.gz) from Themisto2 export.")
+                         help="export.color_sets.txt(.gz) from Themisto2 export. "
+                              "Format per line: "
+                              "'color_set_id=N size=M c1 c2 c3 ...'")
     parser.add_argument("--lineage-mapping", required=True, type=Path,
-                         help="TSV with columns Sample_ID, lineage_id, in the "
-                              "same genome order used at index build time "
-                              "(colour_id = row index, 0-indexed).")
+                         help="TSV(.gz) with columns Sample_ID, lineage_id, in "
+                              "the same genome order used at index build time "
+                              "(color_id = row index, 0-indexed, header on "
+                              "line 1).")
     parser.add_argument("--n-total-colors", required=True, type=int,
-                         help="Total number of colours/genomes in the species "
+                         help="Total number of colors/genomes in the species "
                               "index (from export.metadata.txt's num_colors).")
-    parser.add_argument("--lineage", required=True,
-                         help="Target lineage ID to filter for, e.g. '1' (GPSC1).")
-    parser.add_argument("--core-threshold", required=True, type=float,
-                         help="Minimum core_pct required to keep a unitig. "
-                              "Use ~0.9-1.0 for core mode, ~0.0-0.1 for "
-                              "catch-all mode.")
-    parser.add_argument("--specificity-cutoff", type=float, default=None,
-                         help="Optional maximum outside_pct allowed. If not "
-                              "given, specificity filtering is skipped at "
-                              "this stage.")
-    parser.add_argument("--out", required=True, type=Path,
-                         help="Output path for filtered unitig FASTA (E). "
-                              "Use .gz suffix to compress.")
-    parser.add_argument("--stats-out", type=Path, default=None,
-                         help="Optional path to write summary stats "
-                              "(total/kept/dropped counts).")
-    parser.add_argument("-m", "--mode", 
-                         choices=["core", "catchall"],
+    parser.add_argument("--lineages", required=True, nargs="+",
+                         help="One or more target lineage IDs to filter for, "
+                              "e.g. --lineages 1 2 3 (GPSC1, GPSC2, GPSC3). "
+                              "Must match lineage_id values in "
+                              "--lineage-mapping.")
+    parser.add_argument("--out-dir", required=True, type=Path,
+                         help="Directory to write per-lineage unitig_id list "
+                              "files (E). One file per lineage, named "
+                              "'{lineage_id}_{mode}_unitig_ids.txt', plain "
+                              "text with one unitig_id per line. Created if "
+                              "it doesn't exist.")
+    parser.add_argument("--stats-out-dir", type=Path, default=None,
+                         help="Optional directory to write per-lineage "
+                              "summary stats (total/kept/dropped counts), "
+                              "named the same way as --out-dir. Created if "
+                              "it doesn't exist. If omitted, no stats are "
+                              "written.")
+    parser.add_argument("-m", "--mode",
+                         choices=["core", "relaxed", "catchall"],
                          default="core",
-                         help="'core': strict, present in 95%% of lineage genomes (override with --threshold). "
-                              "'catchall': relaxed, present in >50%% of lineage genomes (override with --threshold).",)
-    parser.add_argument("-t", "--threshold", 
-                         type=float, 
+                         help="'core': strict, present in ~95%% of lineage "
+                              "genomes (default threshold 0.95). "
+                              "'relaxed': majority, present in >50%% of "
+                              "lineage genomes (default threshold 0.5). "
+                              "'catchall': any, present in at least one "
+                              "lineage genome (default threshold 0.0). "
+                              "All overridable with --threshold.")
+    parser.add_argument("-t", "--threshold",
+                         type=float,
                          default=None,
-                         help="Override default cutoff (0.95 core / 0.5 catchall).")
+                         help="Override default cutoff (0.95 core / 0.5 "
+                              "relaxed / 0.0 catchall). Must be between "
+                              "0.0 and 1.0.")
     return parser.parse_args()
 
 def validate_threshold_args(args):
