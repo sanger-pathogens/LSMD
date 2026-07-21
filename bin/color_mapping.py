@@ -11,9 +11,31 @@ Reads a metadata CSV, sorts samples by a user-specified label column
 
 import argparse
 import os
+import re
 import sys
 import pandas as pd
 from pathlib import Path
+
+# For labels with multiple semicolon-separated values (e.g. GPSC "1215;5"),
+# --resolve-multi-value picks the smallest numeric value -- smaller is the
+# current canonical label under GPSC v11 (higher numbers were merged into
+# lower ones). Exception: "235;9" is a genuine biological blend of two
+# distinct families (not a merge), so it's kept as a combined label "235_9"
+# rather than resolved to either parent.
+BLEND_EXCEPTIONS = {"235;9", "9;235"}
+
+
+def resolve_multi_value_label(raw):
+    if ";" not in raw:
+        return raw
+    parts = [p.strip() for p in raw.split(";")]
+    if raw in BLEND_EXCEPTIONS:
+        return "_".join(sorted(parts, key=int))
+    return str(min(int(p) for p in parts))
+
+
+def sanitize_id(raw):
+    return re.sub(r"[^A-Za-z0-9._-]", "_", raw)
 
 
 def parse_args():
@@ -22,7 +44,11 @@ def parse_args():
     )
     parser.add_argument(
         "--metadata", required=True,
-        help="Path to metadata CSV file."
+        help="Path to metadata file (CSV/TSV, optionally gzipped -- inferred from extension)."
+    )
+    parser.add_argument(
+        "--sep", default=",",
+        help="Field separator for --metadata, e.g. ',' (default) or $'\\t' for TSV."
     )
     parser.add_argument(
         "--sample-col", default="Sample_ID",
@@ -49,20 +75,53 @@ def parse_args():
         "--out-dir", required=True,
         help="Output directory for file_colors_input.txt, label_mapping.tsv, and stats.txt."
     )
+    parser.add_argument(
+        "--resolve-multi-value", action="store_true",
+        help="For labels with multiple semicolon-separated values (e.g. GPSC "
+             "'1215;5'), resolve to the smallest numeric value, keeping the "
+             "known 235;9 blend as a combined '235_9' label instead of "
+             "resolving to either parent. Off by default; requires numeric "
+             "label values."
+    )
+    parser.add_argument(
+        "--extra-missing-values", nargs="*", default=[],
+        help="Additional literal string values (besides NaN and the built-in "
+             "'unknown') to treat as a missing/unresolved label and drop, "
+             "e.g. --extra-missing-values unclassifiable. Empty by default "
+             "so existing behaviour is unchanged."
+    )
+    parser.add_argument(
+        "--sanitize-sample-id", action="store_true",
+        help="Before matching against assembly filenames, replace every "
+             "character in --sample-col that isn't alphanumeric/'.'/'-'/'_' "
+             "with '_' (matches the transform used when Pathogenwatch-style "
+             "names containing '/', spaces, or parentheses were turned into "
+             "filenames on disk). Off by default."
+    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
 
-    metadata = pd.read_csv(args.metadata, low_memory=False)
+    metadata = pd.read_csv(args.metadata, sep=args.sep, low_memory=False)
 
     missing_cols = [c for c in [args.sample_col, args.label_col] if c not in metadata.columns]
     if missing_cols:
         sys.exit(f"Error: column(s) not found in metadata: {', '.join(missing_cols)}")
 
-    nan_label = metadata[args.label_col].isna().sum()
-    metadata = metadata.dropna(subset=[args.label_col])
+    # Treat NaN and literal sentinel strings (e.g. "unknown" for unresolved
+    # sylph species calls, or "unclassifiable" for unresolved Pathogenwatch
+    # typing) the same way: no usable label, so the sample is dropped rather
+    # than grouped into a bogus catch-all label.
+    missing_values = {"unknown", *args.extra_missing_values}
+    is_missing = metadata[args.label_col].isna() | metadata[args.label_col].isin(missing_values)
+    nan_label = is_missing.sum()
+    metadata = metadata[~is_missing]
+
+    n_multi_value = int(metadata[args.label_col].astype(str).str.contains(";").sum())
+    if args.resolve_multi_value:
+        metadata[args.label_col] = metadata[args.label_col].astype(str).apply(resolve_multi_value_label)
 
     # sort by label lexicographically, then by sample ID within each group
     metadata = metadata.sort_values(
@@ -70,10 +129,14 @@ def main():
         key=lambda col: col.astype(str)
     )
 
+    sample_ids = metadata[args.sample_col].astype(str)
+    if args.sanitize_sample_id:
+        sample_ids = sample_ids.apply(sanitize_id)
+
     if args.assembly_dir:
         assembly_dir = Path(args.assembly_dir)
         assembly_files = set(os.listdir(assembly_dir))
-        metadata["filename"] = metadata[args.sample_col].astype(str) + args.assembly_suffix
+        metadata["filename"] = sample_ids + args.assembly_suffix
         no_assembly = ~metadata["filename"].isin(assembly_files)
         on_disk_no_metadata = assembly_files - set(metadata["filename"])
         metadata = metadata[metadata["filename"].isin(assembly_files)].reset_index(drop=True)
@@ -83,7 +146,7 @@ def main():
             path_list = [line.strip() for line in fh if line.strip()]
         # build lookup: basename (without suffix) -> full path
         path_lookup = {Path(p).name: p for p in path_list}
-        metadata["filename"] = metadata[args.sample_col].astype(str) + args.assembly_suffix
+        metadata["filename"] = sample_ids + args.assembly_suffix
         no_assembly = ~metadata["filename"].isin(path_lookup)
         listed_names = set(path_lookup.keys())
         on_disk_no_metadata = listed_names - set(metadata["filename"])

@@ -39,7 +39,12 @@ Parameters (passed in, never hardcoded):
   LINEAGE_MAP         = mapping of lineage ID -> list of genome/color IDs
   BACKGROUND_DBS      = list of background reference indexes to check against
                         (e.g. [ATB, GTDB] — extensible to any future db)
-  CORE_THRESHOLD      = core presence cutoff (e.g. 0.9 for "core", 0.0-0.1 for "catch-all")
+  MIN_FREQ            = minimum presence fraction a unitig must reach within
+                        the lineage to be kept. This is the one real
+                        parameter; CORE_MODE / RELAXED_MODE / CATCHALL_MODE
+                        are just named presets (profiles) for it — e.g.
+                        ~0.95 for "core", ~0.0-0.1 for "catch-all" — always
+                        directly overridable regardless of preset chosen.
   SPECIFICITY_CUTOFF  = max allowed presence outside lineage (e.g. 0.1)
 
 
@@ -68,13 +73,14 @@ DEFINITIONS (A -> G, in the order they appear in the pipeline)
              else in the species but NOT in this lineage. Per-lineage,
              index-native.
 
-  E        = threshold-filtered candidates from B
+  E        = min_freq-filtered candidates from B
              "lineage-core / catch-all candidates" — unitigs kept because
              their presence across the lineage's own genomes crosses
-             CORE_THRESHOLD (~0.9-1.0 for "core" mode, ~0.0-0.1 for
-             "catch-all" mode). Built in Python from a boolean colour-
-             membership vector, per lineage — Python-derived, not yet a
-             real index. THIS SCRIPT'S OUTPUT STOPS HERE.
+             MIN_FREQ (mode supplies the default cutoff — ~0.95 for "core",
+             ~0.0-0.1 for "catch-all" — always overridable via --min-freq).
+             Built in Python from a boolean colour-membership vector, per
+             lineage — Python-derived, not yet a real index. THIS SCRIPT'S
+             OUTPUT STOPS HERE.
 
   F        = E − D   (computed after rebuilding E as a real index — Step 4a)
              "candidate lineage-specific k-mers" — E's candidates with
@@ -104,11 +110,12 @@ PIPELINE — four steps, in order
     computed from the same boolean-vector logic used to build E (Step 3),
     but that is benchmark-only, valid only at the threshold=100% boundary.
 
-  Step 3 — Lineage-core / catch-all threshold candidates (per lineage,
+  Step 3 — Lineage-core / catch-all min_freq candidates (per lineage,
            Python, boolean vector — THIS SCRIPT'S SCOPE)
-    E = threshold-filtered B unitigs
-        (core mode: CORE_THRESHOLD ~0.9-1.0; catch-all mode: ~0.0-0.1;
-         via sum(a & lineage_membership) / sum(lineage_membership))
+    E = min_freq-filtered B unitigs
+        (mode presets the cutoff — core: ~0.95; catch-all: ~0.0-0.1 — via
+         sum(a & lineage_membership) / sum(lineage_membership); always
+         overridable directly via --min-freq)
     This script (core_catchall_filter.py) writes E's surviving unitigs to
     a FASTA and stops. Everything in Step 4 happens outside this file.
 
@@ -231,22 +238,30 @@ def build_lineage_color_mask(lineage_color_ids, n_total_colors) -> np.ndarray:
 def compute_colorset_fractions_streaming(
     color_sets_path,
     lineage_masks: dict[str, np.ndarray],
-) -> dict[str, np.ndarray]:
+) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
     """
     Single streaming pass over export.color_sets.txt(.gz) that computes, for
-    every requested lineage at once, the presence fraction of each
-    color_set_id:
-        fraction = |color_set ∩ lineage| / |lineage|
+    every requested lineage at once, both the within-lineage and
+    outside-lineage presence fraction of each color_set_id:
+        within  = |color_set ∩ lineage|  / |lineage|
+        outside = |color_set ∩ ~lineage| / |~lineage|
+
+    outside_pct is what SPECIFICITY_CUTOFF (see module docstring) refers
+    to — how common this k-mer is *outside* the target lineage. Computed
+    here (not just within_pct) so callers can score candidates by how
+    cleanly they separate the lineage from everything else, not just
+    threshold on within-lineage presence alone.
 
     Unlike parsing the file into a color_set_id -> [color_ids] dict up
     front, this never retains the per-color_set color_ids beyond the line
-    they came from — only the resulting per-lineage fraction is kept. Peak
-    memory is O(n_colorsets * n_lineages) instead of O(total color_ids in
-    the file).
+    they came from — only the resulting per-lineage fractions are kept.
+    Peak memory is O(n_colorsets * n_lineages) instead of O(total color_ids
+    in the file).
 
     Returns
     -------
-    dict[str, np.ndarray]
+    tuple[dict[str, np.ndarray], dict[str, np.ndarray]]
+        (within_fractions_by_lineage, outside_fractions_by_lineage), each
         lineage_id -> dense array of presence fractions indexed by
         color_set_id.
     """
@@ -257,8 +272,19 @@ def compute_colorset_fractions_streaming(
         if size == 0:
             raise ValueError(f"lineage '{lineage_id}' mask has zero members — empty lineage?")
 
+    n_total_colors = next(iter(lineage_masks.values())).shape[0]
+    outside_masks = {lineage_id: ~mask for lineage_id, mask in lineage_masks.items()}
+    outside_sizes = {
+        lineage_id: n_total_colors - size for lineage_id, size in lineage_sizes.items()
+    }
+    for lineage_id, size in outside_sizes.items():
+        if size == 0:
+            raise ValueError(f"lineage '{lineage_id}' has no genomes outside it — "
+                              f"cannot compute an outside-lineage fraction")
+
     seen_colorset_ids = []
-    fractions_by_lineage = {lineage_id: [] for lineage_id in lineage_masks}
+    within_by_lineage = {lineage_id: [] for lineage_id in lineage_masks}
+    outside_by_lineage = {lineage_id: [] for lineage_id in lineage_masks}
 
     with _open(color_sets_path) as fh:
         for line in fh:
@@ -273,20 +299,26 @@ def compute_colorset_fractions_streaming(
 
             seen_colorset_ids.append(color_set_id)
             for lineage_id, mask in lineage_masks.items():
-                fraction = np.sum(mask[color_ids]) / lineage_sizes[lineage_id]
-                fractions_by_lineage[lineage_id].append(fraction)
+                within_by_lineage[lineage_id].append(
+                    np.sum(mask[color_ids]) / lineage_sizes[lineage_id]
+                )
+                outside_by_lineage[lineage_id].append(
+                    np.sum(outside_masks[lineage_id][color_ids]) / outside_sizes[lineage_id]
+                )
 
     colorset_ids_arr = np.array(seen_colorset_ids, dtype=np.int64)
     max_colorset_id = colorset_ids_arr.max() if len(colorset_ids_arr) else -1
 
-    fraction_arrays = {}
-    for lineage_id, fractions in fractions_by_lineage.items():
-        fraction_array = np.zeros(max_colorset_id + 1, dtype=np.float64)
-        fraction_array[colorset_ids_arr] = np.array(fractions, dtype=np.float64)
-        fraction_arrays[lineage_id] = fraction_array
+    def _to_dense(by_lineage):
+        dense_by_lineage = {}
+        for lineage_id, values in by_lineage.items():
+            dense = np.zeros(max_colorset_id + 1, dtype=np.float64)
+            dense[colorset_ids_arr] = np.array(values, dtype=np.float64)
+            dense_by_lineage[lineage_id] = dense
+        return dense_by_lineage
 
-    return fraction_arrays
-    
+    return _to_dense(within_by_lineage), _to_dense(outside_by_lineage)
+
 def map_unitig_fractions(
     unitig_colorset_ids: np.ndarray,
     fraction_array: np.ndarray,
@@ -294,40 +326,54 @@ def map_unitig_fractions(
     return fraction_array[unitig_colorset_ids]
 
 ##############################################################################
+### Mode presets
+#
+# mode is a named preset (profile) for the one real parameter, min_freq —
+# the minimum presence fraction a unitig must reach within the lineage to
+# be kept. Each mode just supplies min_freq's default; --min-freq always
+# overrides it directly, regardless of mode.
+
+COREMODE_MIN_FREQ = 0.95
+RELAXMODE_MIN_FREQ = 0.5
+CATCHMODE_MIN_FREQ = 0.0
+
+##############################################################################
 ### Thresholding logic
 
-def threshold_mask(
+def min_freq_mask(
     fractions: np.ndarray,
     mode: str,
-    threshold: float | None = None,
+    min_freq: float | None = None,
 ) -> np.ndarray:
     """
-    mode='core':     fractions >= threshold   (default threshold = 0.95)
+    mode='core':     fractions >= min_freq   (default min_freq = COREMODE_MIN_FREQ)
                       STRICT — k-mer must be present in ~95%+ of the
                       lineage's genomes. Near-universal, tolerant of a
                       small number of dropouts (assembly gaps,
                       sequencing noise, one-off bad samples).
 
-    mode='relaxed':   fractions >  threshold   (default threshold = 0.5)
+    mode='relaxed':   fractions >  min_freq   (default min_freq = RELAXMODE_MIN_FREQ)
                       MAJORITY — k-mer must be present in >50% of the
                       lineage's genomes. Includes core + common
                       accessory content, excludes rare/sporadic k-mers.
 
-    mode='catchall':  fractions >  threshold   (default threshold = 0.0)
+    mode='catchall':  fractions >  min_freq   (default min_freq = CATCHMODE_MIN_FREQ)
                       ANY — k-mer must be present in at least one
-                      genome of the lineage. Core + all accessory,
-                      no noise floor.
+                      genome of the lineage. Core + all accessory. The
+                      strict '>' means a unitig absent from every genome
+                      in the lineage (fraction == 0) never passes, even
+                      at the default floor of 0.0.
 
-    threshold overrides the default cutoff for any mode.
+    min_freq overrides the mode's default cutoff.
     """
     if mode == "core":
-        cutoff = threshold if threshold is not None else 0.95
+        cutoff = min_freq if min_freq is not None else COREMODE_MIN_FREQ
         return fractions >= cutoff
     elif mode == "relaxed":
-        cutoff = threshold if threshold is not None else 0.5
+        cutoff = min_freq if min_freq is not None else RELAXMODE_MIN_FREQ
         return fractions > cutoff
     elif mode == "catchall":
-        cutoff = threshold if threshold is not None else 0.0
+        cutoff = min_freq if min_freq is not None else CATCHMODE_MIN_FREQ
         return fractions > cutoff
     else:
         raise ValueError(f"unknown mode: {mode!r}")
@@ -348,18 +394,41 @@ def write_lineage_unitig_ids(mask: np.ndarray, out_path):
 
     return total, kept_count, dropped_count
 
-def write_lineage_summary_stats(lineage_id, mode, threshold, total, kept_count,
+def write_lineage_summary_stats(lineage_id, mode, min_freq, total, kept_count,
                                  dropped_count, stats_out_path):
     """Write a summary of one lineage+mode run to stats_out_path."""
     stats_lines = [
-        f"Lineage               : {lineage_id}",
-        f"Mode                  : {mode}",
-        f"Threshold             : {threshold}",
-        f"Total unitigs scanned : {total:,}",
-        f"Kept (E)              : {kept_count:,}",
-        f"Dropped               : {dropped_count:,}",
+        f"{'Lineage':<21} : {lineage_id}",
+        f"{'Mode':<21} : {mode}",
+        f"{'Min freq':<21} : {min_freq}",
+        f"{'Total unitigs scanned':<21} : {total:,}",
+        f"{'Kept (E)':<21} : {kept_count:,}",
+        f"{'Dropped':<21} : {dropped_count:,}",
     ]
     Path(stats_out_path).write_text("\n".join(stats_lines) + "\n")
+
+def write_specificity_scores(mask, core_fractions, outside_fractions, out_path):
+    """
+    Write per-unitig specificity scores for the kept (E) set, i.e. unitigs
+    where mask is True.
+
+    score = core_pct - outside_pct
+
+    Mathematically identical to Youden's J statistic
+    (sensitivity + specificity - 1), the standard diagnostic-marker-quality
+    metric: +1 = perfect marker (present in 100% of the target lineage, 0%
+    of everything else); 0 = no discriminating power; negative = the k-mer
+    is actually more common outside the lineage than inside it.
+    """
+    passing_ids = np.nonzero(mask)[0]
+    with _open_out(out_path) as out_fh:
+        out_fh.write("unitig_id\tcore_pct\toutside_pct\tspecificity_score\n")
+        for unitig_id in passing_ids:
+            core_pct = core_fractions[unitig_id]
+            outside_pct = outside_fractions[unitig_id]
+            out_fh.write(
+                f"{unitig_id}\t{core_pct:.6f}\t{outside_pct:.6f}\t{core_pct - outside_pct:.6f}\n"
+            )
 
 ##############################################################################
 ### Orchestrate:
@@ -369,21 +438,29 @@ def process_lineage(
     fraction_array: np.ndarray,
     unitig_colorset_ids: np.ndarray,
     mode: str,
-    threshold: float | None,
+    min_freq: float | None,
     out_path,
     stats_out_path=None,
+    outside_fraction_array: np.ndarray | None = None,
+    specificity_out_path=None,
 ):
     unitig_fractions = map_unitig_fractions(unitig_colorset_ids, fraction_array)
 
-    mask = threshold_mask(unitig_fractions, mode, threshold)
+    mask = min_freq_mask(unitig_fractions, mode, min_freq)
 
     total, kept_count, dropped_count = write_lineage_unitig_ids(mask, out_path)
 
     if stats_out_path:
         write_lineage_summary_stats(
-            lineage_id, mode, threshold, total, kept_count, dropped_count,
+            lineage_id, mode, min_freq, total, kept_count, dropped_count,
             stats_out_path,
         )
+
+    if specificity_out_path:
+        if outside_fraction_array is None:
+            raise ValueError("specificity_out_path given but outside_fraction_array is None")
+        unitig_outside_fractions = map_unitig_fractions(unitig_colorset_ids, outside_fraction_array)
+        write_specificity_scores(mask, unitig_fractions, unitig_outside_fractions, specificity_out_path)
 
     return total, kept_count, dropped_count
 
@@ -428,35 +505,55 @@ def parse_args():
                               "named the same way as --out-dir. Created if "
                               "it doesn't exist. If omitted, no stats are "
                               "written.")
+    parser.add_argument("--specificity-out-dir", type=Path, default=None,
+                         help="Optional directory to write per-unitig "
+                              "specificity scores for the kept (E) set: "
+                              "core_pct, outside_pct, and "
+                              "specificity_score = core_pct - outside_pct "
+                              "(Youden's J -- diagnostic marker quality; "
+                              "+1 = perfect, 0 = no discriminating power, "
+                              "negative = more common outside the lineage "
+                              "than inside it). Named "
+                              "'{lineage_id}_{mode}_specificity.tsv'. "
+                              "Created if it doesn't exist. If omitted, not "
+                              "written.")
     parser.add_argument("-m", "--mode",
                          choices=["core", "relaxed", "catchall"],
                          default="core",
-                         help="'core': strict, present in ~95%% of lineage "
-                              "genomes (default threshold 0.95). "
+                         help="Preset for --min-freq. 'core': strict, "
+                              f"present in ~95%% of lineage genomes "
+                              f"(default min_freq {COREMODE_MIN_FREQ}). "
                               "'relaxed': majority, present in >50%% of "
-                              "lineage genomes (default threshold 0.5). "
-                              "'catchall': any, present in at least one "
-                              "lineage genome (default threshold 0.0). "
-                              "All overridable with --threshold.")
-    parser.add_argument("-t", "--threshold",
+                              f"lineage genomes (default min_freq "
+                              f"{RELAXMODE_MIN_FREQ}). 'catchall': any, "
+                              "present in at least one lineage genome "
+                              f"(default min_freq {CATCHMODE_MIN_FREQ}). "
+                              "All overridable with --min-freq.")
+    parser.add_argument("-f", "--min-freq",
                          type=float,
                          default=None,
-                         help="Override default cutoff (0.95 core / 0.5 "
-                              "relaxed / 0.0 catchall). Must be between "
-                              "0.0 and 1.0.")
+                         help="Minimum presence fraction a unitig must "
+                              "reach within the lineage to be kept. "
+                              "Overrides the mode's default "
+                              f"({COREMODE_MIN_FREQ} core / "
+                              f"{RELAXMODE_MIN_FREQ} relaxed / "
+                              f"{CATCHMODE_MIN_FREQ} catchall). Must be "
+                              "between 0.0 and 1.0.")
     return parser.parse_args()
 
-def validate_threshold_args(args):
-    if args.threshold is not None and not (0.0 <= args.threshold <= 1.0):
-        raise ValueError(f"--threshold must be between 0.0 and 1.0, got {args.threshold}")
+def validate_min_freq_args(args):
+    if args.min_freq is not None and not (0.0 <= args.min_freq <= 1.0):
+        raise ValueError(f"--min-freq must be between 0.0 and 1.0, got {args.min_freq}")
 
 def main():
     args = parse_args()
-    validate_threshold_args(args)
+    validate_min_freq_args(args)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     if args.stats_out_dir:
         args.stats_out_dir.mkdir(parents=True, exist_ok=True)
+    if args.specificity_out_dir:
+        args.specificity_out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Loading unitig colorset IDs from {args.unitigs} ...", file=sys.stderr)
     unitig_colorset_ids = load_unitig_colorset_ids(args.unitigs)
@@ -477,7 +574,7 @@ def main():
         )
 
     print(f"Streaming color sets from {args.color_sets} ...", file=sys.stderr)
-    fractions_by_lineage = compute_colorset_fractions_streaming(
+    fractions_by_lineage, outside_fractions_by_lineage = compute_colorset_fractions_streaming(
         args.color_sets, lineage_masks
     )
     print(f"  presence fractions computed for {len(fractions_by_lineage):,} lineage(s)",
@@ -489,6 +586,10 @@ def main():
             args.stats_out_dir / f"{lineage_id}_{args.mode}_unitig_ids.txt"
             if args.stats_out_dir else None
         )
+        specificity_out_path = (
+            args.specificity_out_dir / f"{lineage_id}_{args.mode}_specificity.tsv"
+            if args.specificity_out_dir else None
+        )
 
         print(f"Processing lineage '{lineage_id}' (mode={args.mode}) ...",
               file=sys.stderr)
@@ -497,9 +598,11 @@ def main():
             fraction_array=fractions_by_lineage[lineage_id],
             unitig_colorset_ids=unitig_colorset_ids,
             mode=args.mode,
-            threshold=args.threshold,
+            min_freq=args.min_freq,
             out_path=out_path,
             stats_out_path=stats_out_path,
+            outside_fraction_array=outside_fractions_by_lineage[lineage_id],
+            specificity_out_path=specificity_out_path,
         )
         print(f"  Total: {total:,}  Kept (E): {kept_count:,}  Dropped: {dropped_count:,}",
               file=sys.stderr)
