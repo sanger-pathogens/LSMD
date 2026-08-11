@@ -71,7 +71,12 @@ def main():
     )
 
     if args.assembly_dir:
-        assembly_dir = Path(args.assembly_dir)
+        # Resolve to the canonical absolute path, not whatever Nextflow staged
+        # locally (a symlink named e.g. "assemblies" inside this task's own work
+        # dir). file_colors_input.txt is read by GGCAT in a *different* task dir,
+        # where that local symlink doesn't exist -- only an absolute path on
+        # shared storage (bind-mounted into every container) resolves there too.
+        assembly_dir = Path(args.assembly_dir).resolve()
         assembly_files = set(os.listdir(assembly_dir))
         metadata["filename"] = metadata[args.sample_col].astype(str) + args.assembly_suffix
         no_assembly = ~metadata["filename"].isin(assembly_files)
