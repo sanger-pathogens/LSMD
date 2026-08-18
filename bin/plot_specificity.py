@@ -15,11 +15,12 @@ Usage:
 import argparse
 from pathlib import Path
 
-import numpy as np
 import matplotlib
+import numpy as np
+
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
+import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.ticker as mticker  # noqa: E402
 
 # Palette (dataviz skill reference palette, series slot 1 -- light mode)
 SERIES_BLUE = "#2a78d6"
@@ -31,28 +32,38 @@ THRESHOLD_COLOR = "#e34948"  # palette slot 8, red -- reserved/status-style refe
 
 GOOD_SPECIFICITY_THRESHOLD = 0.9
 
-PREVIEW_NOTE = (
-    "PREVIEW on E (lineage-core candidates) — cross-lineage exclusion "
-    "(F = E − D) not yet applied"
-)
+PREVIEW_NOTE = "PREVIEW on E (lineage-core candidates) — cross-lineage exclusion " "(F = E − D) not yet applied"
 
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--specificity", required=True, type=Path,
-                   help="'{lineage_id}_{mode}_specificity.tsv' from core_catchall_filter.py "
-                        "(columns: unitig_id, core_pct, outside_pct, specificity_score)")
-    p.add_argument("--label", required=True,
-                   help="Short identifier for filenames, e.g. v_cholerae_sublineage_1.0_E")
-    p.add_argument("--display-name", required=True,
-                   help="Human-readable species/lineage name for chart titles, "
-                        "e.g. 'V. cholerae — lineage 1.0'")
-    p.add_argument("--mode", required=True, choices=["core", "relaxed", "catchall"],
-                   help="Threshold mode used to build E, shown on every figure so "
-                        "it's unambiguous if the figure is shared without context")
-    p.add_argument("--good-threshold", type=float, default=GOOD_SPECIFICITY_THRESHOLD,
-                   help=f"Specificity score marking a 'high-specificity' candidate marker "
-                        f"(default {GOOD_SPECIFICITY_THRESHOLD})")
+    p.add_argument(
+        "--specificity",
+        required=True,
+        type=Path,
+        help="'{lineage_id}_{mode}_specificity.tsv' from core_catchall_filter.py "
+        "(columns: unitig_id, core_pct, outside_pct, specificity_score)",
+    )
+    p.add_argument("--label", required=True, help="Short identifier for filenames, e.g. v_cholerae_sublineage_1.0_E")
+    p.add_argument(
+        "--display-name",
+        required=True,
+        help="Human-readable species/lineage name for chart titles, " "e.g. 'V. cholerae — lineage 1.0'",
+    )
+    p.add_argument(
+        "--mode",
+        required=True,
+        choices=["core", "relaxed", "catchall"],
+        help="Threshold mode used to build E, shown on every figure so "
+        "it's unambiguous if the figure is shared without context",
+    )
+    p.add_argument(
+        "--good-threshold",
+        type=float,
+        default=GOOD_SPECIFICITY_THRESHOLD,
+        help=f"Specificity score marking a 'high-specificity' candidate marker "
+        f"(default {GOOD_SPECIFICITY_THRESHOLD})",
+    )
     p.add_argument("--out-dir", required=True, type=Path)
     return p.parse_args()
 
@@ -93,9 +104,7 @@ def main():
         f"score < 0 (more common outside than in)  : {n_neg:,} / {n:,} ({100 * n_neg / n:.2f}%)",
     ]
     print("\n".join(stats_lines))
-    (args.out_dir / f"{args.label}_specificity_stats.txt").write_text(
-        "\n".join(stats_lines) + "\n"
-    )
+    (args.out_dir / f"{args.label}_specificity_stats.txt").write_text("\n".join(stats_lines) + "\n")
 
     fig_fmt = dict(figsize=(9, 4.6), dpi=200)
 
@@ -112,17 +121,35 @@ def main():
     bins = np.linspace(score.min(), score.max(), 80)
     ax.hist(score, bins=bins, color=SERIES_BLUE, edgecolor=SURFACE, linewidth=0.4, zorder=2)
     ax.set_yscale("log")
-    ax.axvline(threshold, color=THRESHOLD_COLOR, linewidth=1.5,
-               linestyle=(0, (4, 2)), zorder=3)
-    ax.text(threshold, ax.get_ylim()[1], f" score ≥ {threshold:g} = high-specificity candidate",
-            color=THRESHOLD_COLOR, fontsize=9, va="top", ha="left")
+    ax.axvline(threshold, color=THRESHOLD_COLOR, linewidth=1.5, linestyle=(0, (4, 2)), zorder=3)
+    ax.text(
+        threshold,
+        ax.get_ylim()[1],
+        f" score ≥ {threshold:g} = high-specificity candidate",
+        color=THRESHOLD_COLOR,
+        fontsize=9,
+        va="top",
+        ha="left",
+    )
     ax.set_xlabel("Specificity score (core_pct − outside_pct)")
     ax.set_ylabel("Count (log scale)")
     ax.set_title(
         f"{args.display_name} — candidate marker specificity, {args.mode} mode (n={n:,})",
-        color=TEXT_PRIMARY, fontsize=11, loc="left")
-    ax.text(0.0, 1.10, PREVIEW_NOTE, transform=ax.transAxes, ha="left", va="bottom",
-            fontsize=8.5, color=TEXT_SECONDARY, style="italic")
+        color=TEXT_PRIMARY,
+        fontsize=11,
+        loc="left",
+    )
+    ax.text(
+        0.0,
+        1.10,
+        PREVIEW_NOTE,
+        transform=ax.transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=8.5,
+        color=TEXT_SECONDARY,
+        style="italic",
+    )
     style_axes(ax)
     fig.tight_layout()
     fig.savefig(args.out_dir / f"{args.label}_specificity_score_hist.png", facecolor=SURFACE)
@@ -138,23 +165,39 @@ def main():
 
     fig, ax = plt.subplots(**fig_fmt)
     ax.plot(sorted_scores, survival, color=SERIES_BLUE, linewidth=2, zorder=2)
-    ax.axvline(threshold, color=THRESHOLD_COLOR, linewidth=1.5,
-               linestyle=(0, (4, 2)), zorder=3)
-    ax.axhline(frac_good, color=THRESHOLD_COLOR, linewidth=1, alpha=0.5,
-               linestyle=(0, (1, 2)), zorder=1)
-    ax.annotate(f"{frac_good * 100:.2f}% of candidates are high-specificity (score ≥ {threshold:g})",
-                xy=(threshold, frac_good), xytext=(-10, 25), ha="right",
-                textcoords="offset points", fontsize=9, color=THRESHOLD_COLOR,
-                arrowprops=dict(arrowstyle="-", color=THRESHOLD_COLOR, lw=0.8))
+    ax.axvline(threshold, color=THRESHOLD_COLOR, linewidth=1.5, linestyle=(0, (4, 2)), zorder=3)
+    ax.axhline(frac_good, color=THRESHOLD_COLOR, linewidth=1, alpha=0.5, linestyle=(0, (1, 2)), zorder=1)
+    ax.annotate(
+        f"{frac_good * 100:.2f}% of candidates are high-specificity (score ≥ {threshold:g})",
+        xy=(threshold, frac_good),
+        xytext=(-10, 25),
+        ha="right",
+        textcoords="offset points",
+        fontsize=9,
+        color=THRESHOLD_COLOR,
+        arrowprops=dict(arrowstyle="-", color=THRESHOLD_COLOR, lw=0.8),
+    )
     ax.set_ylim(0, 1.02)
     ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
     ax.set_xlabel("Specificity score cutoff (core_pct − outside_pct)")
     ax.set_ylabel("Fraction of candidates ≥ cutoff")
     ax.set_title(
         f"{args.display_name} — candidate markers clearing a specificity cutoff, {args.mode} mode (n={n:,})",
-        color=TEXT_PRIMARY, fontsize=11, loc="left")
-    ax.text(0.0, 1.10, PREVIEW_NOTE, transform=ax.transAxes, ha="left", va="bottom",
-            fontsize=8.5, color=TEXT_SECONDARY, style="italic")
+        color=TEXT_PRIMARY,
+        fontsize=11,
+        loc="left",
+    )
+    ax.text(
+        0.0,
+        1.10,
+        PREVIEW_NOTE,
+        transform=ax.transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=8.5,
+        color=TEXT_SECONDARY,
+        style="italic",
+    )
     style_axes(ax)
     fig.tight_layout()
     fig.savefig(args.out_dir / f"{args.label}_specificity_survival.png", facecolor=SURFACE)

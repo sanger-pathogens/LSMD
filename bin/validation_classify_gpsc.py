@@ -40,9 +40,9 @@
 #   top_gpsc_score        : raw gpsc_score of the predicted GPSC
 # =============================================================================
 
+import argparse
 import gzip
 import json
-import argparse
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -50,15 +50,17 @@ import pandas as pd
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Summarise Themisto2 pseudoalignment color hits by GPSC lineage."
-    )
+    parser = argparse.ArgumentParser(description="Summarise Themisto2 pseudoalignment color hits by GPSC lineage.")
 
     parser.add_argument(
         "--manifest",
         required=True,
         type=Path,
-        help="Path to manifest file containing 'sample_ID' column from metadata, JSONL file output from themisto threshold-pseudoalign, Path to the query's fasta file and known GPSC label (This is an optional column to fill, metadata file provided can automatically fill this blank space).",
+        help=(
+            "Path to manifest file containing 'sample_ID' column from metadata, JSONL file output from themisto "
+            "threshold-pseudoalign, Path to the query's fasta file and known GPSC label (This is an optional "
+            "column to fill, metadata file provided can automatically fill this blank space)."
+        ),
     )
 
     parser.add_argument(
@@ -89,28 +91,33 @@ def parse_args():
         "--min-contig-coverage",
         type=float,
         default=None,
-        help="Minimum fraction of contig k-mers that must be covered for a contig to be used. Default: None (no filter applied, equivalent to 0).",
+        help=(
+            "Minimum fraction of contig k-mers that must be covered for a contig to be used. "
+            "Default: None (no filter applied, equivalent to 0)."
+        ),
     )
 
     parser.add_argument(
         "--output",
         type=Path,
         default=Path("results/"),
-        help=(
-            "Path to the GPSC summary output files. Default: results/."
-        ),
+        help=("Path to the GPSC summary output files. Default: results/."),
     )
 
     parser.add_argument(
         "--min-unique-refs",
         type=int,
         default=10,
-        help="Minimum number of unique matched references a GPSC must have to be considered for the top prediction. Default: 10.",
+        help=(
+            "Minimum number of unique matched references a GPSC must have to be considered "
+            "for the top prediction. Default: 10."
+        ),
     )
 
     return parser.parse_args()
 
-#Input functions
+
+# Input functions
 def read_manifest(manifest_path):
     # validate required columns in the manifest file
     # keep full dataframe for later use, including optional columns like GPSC
@@ -155,8 +162,7 @@ def load_mapping(mapping_path):
     missing = required_cols - set(color2sample_mapping.columns)
 
     if missing:
-        raise ValueError(
-            f"Mapping file is missing required columns: {missing}. ")
+        raise ValueError(f"Mapping file is missing required columns: {missing}. ")
 
     color2sample_mapping["Sample_ID"] = color2sample_mapping["Sample_ID"].astype(str)
     color2sample_mapping["GPSC"] = color2sample_mapping["GPSC"].astype(int)
@@ -271,8 +277,8 @@ def parse_themisto_output(jsonl_path, color2sample_mapping, contig_lengths, min_
     gpsc_list = color2sample_mapping["GPSC"].tolist()
     n_ref = len(gpsc_list)
 
-    cumulative_bases_cov = defaultdict(int)   # sum of raw bases covered per GPSC across all hits
-    contig_lengths_by_gpsc = defaultdict(int) # sum of query contig lengths that hit each GPSC
+    cumulative_bases_cov = defaultdict(int)  # sum of raw bases covered per GPSC across all hits
+    contig_lengths_by_gpsc = defaultdict(int)  # sum of query contig lengths that hit each GPSC
     unique_colors_by_gpsc = defaultdict(set)
     contig_support = Counter()
     colors_per_contig = []
@@ -302,9 +308,7 @@ def parse_themisto_output(jsonl_path, color2sample_mapping, contig_lengths, min_
             coverage_fraction = compute_contig_coverage(bases_covered_list, contig_length)
 
             passed = (
-                min_contig_coverage is None
-                or coverage_fraction is None
-                or coverage_fraction >= min_contig_coverage
+                min_contig_coverage is None or coverage_fraction is None or coverage_fraction >= min_contig_coverage
             )
 
             contig_record = {
@@ -371,21 +375,20 @@ def make_summary_tables(results, color2sample_mapping):
         size = gpsc_size.get(gpsc, 0)
         contigs = results["contig_support"].get(gpsc, 0)
 
-        gpsc_score = (
-            (avg_hit_breadth_cov / size) * (unique_hits / size) ** 0.5
-            if size else 0
-        )
+        gpsc_score = (avg_hit_breadth_cov / size) * (unique_hits / size) ** 0.5 if size else 0
 
         contig_hit_fraction = contigs / parsed_contigs_used if parsed_contigs_used > 0 else 0
 
-        rows.append({
-            "GPSC": gpsc,
-            "avg_hit_breadth_cov": avg_hit_breadth_cov,
-            "unique_matched_refs": unique_hits,
-            "gpsc_size": size,
-            "gpsc_score": gpsc_score,
-            "contig_hit_fraction": contig_hit_fraction,
-        })
+        rows.append(
+            {
+                "GPSC": gpsc,
+                "avg_hit_breadth_cov": avg_hit_breadth_cov,
+                "unique_matched_refs": unique_hits,
+                "gpsc_size": size,
+                "gpsc_score": gpsc_score,
+                "contig_hit_fraction": contig_hit_fraction,
+            }
+        )
 
     return pd.DataFrame(rows)
 
@@ -401,11 +404,7 @@ def print_top_tables(summary, top):
     ]
 
     print("\nTop GPSCs by gpsc_score:")
-    print(
-        summary.sort_values("gpsc_score", ascending=False)
-        .head(top)[cols]
-        .to_string(index=False)
-    )
+    print(summary.sort_values("gpsc_score", ascending=False).head(top)[cols].to_string(index=False))
 
 
 def main():
@@ -445,7 +444,11 @@ def main():
 
         eligible = sorted_summary[sorted_summary["unique_matched_refs"] >= args.min_unique_refs]
         top_gpsc = str(int(float(eligible.iloc[0]["GPSC"]))) if len(eligible) > 0 else "NA"
-        match = int(float(top_gpsc)) == int(float(str(query["known_gpsc"]))) if query["known_gpsc"] is not None and top_gpsc != "NA" else None
+        match = (
+            int(float(top_gpsc)) == int(float(str(query["known_gpsc"])))
+            if query["known_gpsc"] is not None and top_gpsc != "NA"
+            else None
+        )
 
         contig_cols = ["contig", "n_matched_refs", "best_ref_kmer_coverage", "passed_coverage_filter"]
         colors_per_contig = pd.DataFrame(results["colors_per_contig"], columns=contig_cols)
@@ -453,24 +456,26 @@ def main():
 
         sorted_summary.head(args.top).to_csv(args.output / f"{sample_id}.gpsc_summary.tsv", sep="\t", index=False)
 
-        pd.DataFrame([{
-            "Sample_ID": sample_id,
-            "predicted_GPSC": top_gpsc,
-            "known_GPSC": query["known_gpsc"],
-            "match": match,
-            "top_to_2nd_score_ratio": score_ratio,
-            "top_score_fraction": top_score_fraction,
-            "top_gpsc_score": top_score,
-        }]).to_csv(args.output / f"{sample_id}.classification.tsv", sep="\t", index=False)
+        pd.DataFrame(
+            [
+                {
+                    "Sample_ID": sample_id,
+                    "predicted_GPSC": top_gpsc,
+                    "known_GPSC": query["known_gpsc"],
+                    "match": match,
+                    "top_to_2nd_score_ratio": score_ratio,
+                    "top_score_fraction": top_score_fraction,
+                    "top_gpsc_score": top_score,
+                }
+            ]
+        ).to_csv(args.output / f"{sample_id}.classification.tsv", sep="\t", index=False)
 
         colors_per_contig.sort_values("n_matched_refs", ascending=False).to_csv(
             args.output / f"{sample_id}.colors_per_contig.tsv", sep="\t", index=False
         )
 
         if len(skipped_contigs) > 0:
-            skipped_contigs.to_csv(
-                args.output / f"{sample_id}.skipped_contigs.tsv", sep="\t", index=False
-            )
+            skipped_contigs.to_csv(args.output / f"{sample_id}.skipped_contigs.tsv", sep="\t", index=False)
 
 
 if __name__ == "__main__":
