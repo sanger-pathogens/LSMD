@@ -8,20 +8,20 @@
 
 ## Pipeline overview
 
-lsmd (**l**ineage-**s**pecific **m**arker **d**iscovery) finds k-mer markers that identify a target lineage within a species -- specific enough that they aren't shared with sibling lineages of the same species, *and* aren't shared with a much larger external background collection (e.g. AllTheBacteria/ATB). It's species-agnostic, lineage-agnostic and background-db-agnostic: point it at any species' assemblies plus a lineage/grouping column and a background SBWT index.
+lsmd (**l**ineage-**s**pecific **m**arker **d**iscovery) finds k-mer markers that identify a target lineage within a species -- specific enough that they aren't shared with sibling lineages of the same species, _and_ aren't shared with a much larger external background collection (e.g. AllTheBacteria/ATB). It's species-agnostic, lineage-agnostic and background-db-agnostic: point it at any species' assemblies plus a lineage/grouping column and a background SBWT index.
 
 The pipeline builds a chain of SBWT/Themisto2 indexes and then subtracts them from one another (`sbwt difference`) until what's left is only the k-mers unique to the target lineage. Each intermediate index has a stage name, used as its `emit:` channel name and in `--outdir` filenames/paths:
 
-| Stage name | Meaning |
-| --- | --- |
-| `species_index` | Species-wide index -- all genomes of the target species, coloured by `--group_label`. |
-| `lineage_index` | Per-lineage index -- the subset of `species_index` for one `--target_groups` lineage. |
-| ATB / GTDB | Background index, built independently from a large external genome collection. |
-| `bg_excl` | `background − species_index` -- background exclusion set (currently ATB only; GTDB not yet wired in). |
-| `xlin_bg` | `species_index − lineage_index` -- k-mers found elsewhere in the species but not in this lineage. |
+| Stage name        | Meaning                                                                                                   |
+| ----------------- | --------------------------------------------------------------------------------------------------------- |
+| `species_index`   | Species-wide index -- all genomes of the target species, coloured by `--group_label`.                     |
+| `lineage_index`   | Per-lineage index -- the subset of `species_index` for one `--target_groups` lineage.                     |
+| ATB / GTDB        | Background index, built independently from a large external genome collection.                            |
+| `bg_excl`         | `background − species_index` -- background exclusion set (currently ATB only; GTDB not yet wired in).     |
+| `xlin_bg`         | `species_index − lineage_index` -- k-mers found elsewhere in the species but not in this lineage.         |
 | `candidate_index` | Threshold-filtered candidates from `lineage_index` (`core`/`relaxed`/`catchall` presence-fraction modes). |
-| `lin_cand` | `candidate_index − xlin_bg` -- candidates confirmed specific *within* the species. |
-| `markers` | `lin_cand − bg_excl` -- final marker set, also confirmed specific against the outside background. |
+| `lin_cand`        | `candidate_index − xlin_bg` -- candidates confirmed specific _within_ the species.                        |
+| `markers`         | `lin_cand − bg_excl` -- final marker set, also confirmed specific against the outside background.         |
 
 Concretely, the pipeline runs as three stages:
 
@@ -70,7 +70,7 @@ This pipeline is still early in development (see open TODOs in [main.nf](main.nf
    `docker`/`singularity` profiles are also available (inherited from [nextflow-commons](https://github.com/sanger-pathogens/nextflow-commons)).
    :warning: If no profile is specified the pipeline runs with a Sanger HPC-specific configuration, including use of temp storage (`--temp_space`). Configure appropriately for other systems.
 
-3. A bundled `test` profile runs a small (11-genome) *V. tarriae* dataset, exercising the `--target_groups` code path:
+3. A bundled `test` profile runs a small (11-genome) _V. tarriae_ dataset, exercising the `--target_groups` code path:
 
    ```bash
    nextflow run main.nf -profile test,sanger_local --outdir test_output
@@ -152,30 +152,30 @@ results/
 └── candidate_markers/markers_<species>_<lineage>/
 ```
 
-| Path | Contents |
-| --- | --- |
-| `colour_mapping/<ID>/index_species/` | `species_file_colors_input.txt`, `species_label_mapping.tsv`, `species_stats.json` |
+| Path                                              | Contents                                                                                              |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `colour_mapping/<ID>/index_species/`              | `species_file_colors_input.txt`, `species_label_mapping.tsv`, `species_stats.json`                    |
 | `colour_mapping/<ID>/index_target_group/<group>/` | Same three files, scoped to one `--target_groups` label -- only present when `--target_groups` is set |
-| `ggcat/<ID>/` | Unitigs FASTA built from the colour file |
-| `sbwt/<ID>/` | SBWT index + LCS array for `species_index`/`lineage_index` |
-| `sbwt/<ID>/candidate/<lineage>/` | SBWT index + LCS array for the `candidate_index` rebuild |
-| `sbwt/<stage>/<ID>/` | Checked set-difference indexes -- `<stage>` is `bg_excl`, `xlin_bg` or `lin_cand` |
-| `themisto2/<ID>/build/` | `index.thm2` |
-| `themisto2/<ID>/export/` | `export.unitigs.fa`, `export.color_sets.txt` (optionally gzipped), `export.metadata.txt` |
-| `candidate_filter/<lineage>/` | `{lineage}_{min_freq_label}_candidate_unitigs.fasta` + `_stats.txt` -- `candidate_index`, pre-rebuild |
-| `candidate_markers/markers_<species>_<lineage>/` | Final `markers` outputs -- see below |
+| `ggcat/<ID>/`                                     | Unitigs FASTA built from the colour file                                                              |
+| `sbwt/<ID>/`                                      | SBWT index + LCS array for `species_index`/`lineage_index`                                            |
+| `sbwt/<ID>/candidate/<lineage>/`                  | SBWT index + LCS array for the `candidate_index` rebuild                                              |
+| `sbwt/<stage>/<ID>/`                              | Checked set-difference indexes -- `<stage>` is `bg_excl`, `xlin_bg` or `lin_cand`                     |
+| `themisto2/<ID>/build/`                           | `index.thm2`                                                                                          |
+| `themisto2/<ID>/export/`                          | `export.unitigs.fa`, `export.color_sets.txt` (optionally gzipped), `export.metadata.txt`              |
+| `candidate_filter/<lineage>/`                     | `{lineage}_{min_freq_label}_candidate_unitigs.fasta` + `_stats.txt` -- `candidate_index`, pre-rebuild |
+| `candidate_markers/markers_<species>_<lineage>/`  | Final `markers` outputs -- see below                                                                  |
 
 `<ID>` is either the species run's own ID (`species_index`) or a `--target_groups` label like `GPSC1` (`lineage_index` and its `candidate_index` rebuild).
 
 **`candidate_markers/markers_<species>_<lineage>/` contents:**
 
-| File | Written when |
-| --- | --- |
-| `markers_<species>_<lineage>.sbwt` | Always -- checked `markers` SBWT index |
-| `markers_<species>_<lineage>_unitigs.fasta` | Always -- `markers` dumped to FASTA |
-| `<lineage>_filtered_markers.fasta` | `--primer_post_processing` |
-| `<lineage>_rejected_markers.fasta` | `--primer_post_processing` and `--primer_write_rejected` |
-| `<lineage>_marker_analysis.png` | `--primer_post_processing` and `--primer_plot` |
+| File                                        | Written when                                             |
+| ------------------------------------------- | -------------------------------------------------------- |
+| `markers_<species>_<lineage>.sbwt`          | Always -- checked `markers` SBWT index                   |
+| `markers_<species>_<lineage>_unitigs.fasta` | Always -- `markers` dumped to FASTA                      |
+| `<lineage>_filtered_markers.fasta`          | `--primer_post_processing`                               |
+| `<lineage>_rejected_markers.fasta`          | `--primer_post_processing` and `--primer_write_rejected` |
+| `<lineage>_marker_analysis.png`             | `--primer_post_processing` and `--primer_plot`           |
 
 See the [themisto2 sub-workflow README](assorted-sub-workflows/themisto2/README.md) for the full `stats.json` field reference and `lineage_index` directory layout.
 
@@ -185,59 +185,59 @@ Run `nextflow run main.nf --help` for the full, always-up-to-date list (rendered
 
 **General options**
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--outdir` | `path` | `./results` | Directory where results are written. |
-| `--monochrome_logs` | `boolean` | `false` | Output logs in plain ASCII. |
-| `--temp_space` | `integer` | `10000` | Temp storage (MB) requested for processes that need it (e.g. GGCAT), via the `request_temp` process label. |
+| Option              | Type      | Default     | Description                                                                                                |
+| ------------------- | --------- | ----------- | ---------------------------------------------------------------------------------------------------------- |
+| `--outdir`          | `path`    | `./results` | Directory where results are written.                                                                       |
+| `--monochrome_logs` | `boolean` | `false`     | Output logs in plain ASCII.                                                                                |
+| `--temp_space`      | `integer` | `10000`     | Temp storage (MB) requested for processes that need it (e.g. GGCAT), via the `request_temp` process label. |
 
 ---
 
 **Input options** (colour mapping)
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--metadata` | `path` | `null` | CSV/TSV with one row per assembly, incl. a grouping column. |
-| `--sample_col` | `string` | `Sample_ID` | Metadata column matched against assembly filenames. |
-| `--group_label` | `string` | `null` | Metadata column used to group assemblies into colours (required). |
-| `--assembly_input` | `path` | `null` | Directory of assembly FASTAs, or a `.txt` path-list. |
+| Option              | Type     | Default          | Description                                                                             |
+| ------------------- | -------- | ---------------- | --------------------------------------------------------------------------------------- |
+| `--metadata`        | `path`   | `null`           | CSV/TSV with one row per assembly, incl. a grouping column.                             |
+| `--sample_col`      | `string` | `Sample_ID`      | Metadata column matched against assembly filenames.                                     |
+| `--group_label`     | `string` | `null`           | Metadata column used to group assemblies into colours (required).                       |
+| `--assembly_input`  | `path`   | `null`           | Directory of assembly FASTAs, or a `.txt` path-list.                                    |
 | `--assembly_suffix` | `string` | `.contigs.fasta` | Suffix appended to `--sample_col` to form the assembly filename (directory input only). |
-| `--target_groups` | `string` | `""` | Comma-separated lineage label(s) to also build `lineage_index` for. |
+| `--target_groups`   | `string` | `""`             | Comma-separated lineage label(s) to also build `lineage_index` for.                     |
 
 ---
 
 **Index build options** (GGCAT / SBWT / Themisto2, shared across `species_index`/`lineage_index`/`candidate_index`)
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--kmer_size` | `integer` | `31` | k-mer size used consistently across GGCAT, SBWT and Themisto2. Must match the background index. |
-| `--gzip_export` | `boolean` | `false` | Gzip the Themisto2 export's `color_sets.txt`. |
-| `--temp_dir` | `path` | `""` | Scratch root for GGCAT/SBWT temp/working dirs. Falls back to a task-local work dir; only set for full background-DB-scale runs. |
-| `--candidate_min_freq` | `string` | `core` | Presence-fraction preset (`core` ≥0.95, `relaxed` ≥0.5, `catchall` ≥1 genome) or a literal fraction, for `candidate_index` filtering. |
-| `--candidate_min_genome_count` | `integer` | `5` | Absolute genome-count floor for `candidate_index` filtering, alongside `--candidate_min_freq`. |
+| Option                         | Type      | Default | Description                                                                                                                           |
+| ------------------------------ | --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `--kmer_size`                  | `integer` | `31`    | k-mer size used consistently across GGCAT, SBWT and Themisto2. Must match the background index.                                       |
+| `--gzip_export`                | `boolean` | `false` | Gzip the Themisto2 export's `color_sets.txt`.                                                                                         |
+| `--temp_dir`                   | `path`    | `""`    | Scratch root for GGCAT/SBWT temp/working dirs. Falls back to a task-local work dir; only set for full background-DB-scale runs.       |
+| `--candidate_min_freq`         | `string`  | `core`  | Presence-fraction preset (`core` ≥0.95, `relaxed` ≥0.5, `catchall` ≥1 genome) or a literal fraction, for `candidate_index` filtering. |
+| `--candidate_min_genome_count` | `integer` | `5`     | Absolute genome-count floor for `candidate_index` filtering, alongside `--candidate_min_freq`.                                        |
 
 ---
 
 **Step08 -- set-difference options**
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--bg_index` | `path` | Sanger farm ATB index | Background SBWT index that `bg_excl`/`markers` are diffed against, unless `--bg_excl_index` is set. |
-| `--bg_excl_index` | `path` | `""` | An already-computed `bg_excl` index to reuse, skipping the ATB-scale diff. |
+| Option            | Type   | Default               | Description                                                                                         |
+| ----------------- | ------ | --------------------- | --------------------------------------------------------------------------------------------------- |
+| `--bg_index`      | `path` | Sanger farm ATB index | Background SBWT index that `bg_excl`/`markers` are diffed against, unless `--bg_excl_index` is set. |
+| `--bg_excl_index` | `path` | `""`                  | An already-computed `bg_excl` index to reuse, skipping the ATB-scale diff.                          |
 
 ---
 
 **Step09 -- candidate marker post-processing** (`--primer_post_processing`)
 
-| Option | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--primer_post_processing` | `boolean` | `false` | Filter/mask `markers` for PCR/primer-design suitability. Off by default -- the pipeline stops at the `markers` SBWT index/FASTA otherwise. |
-| `--primer_min_length` | `integer` | `100` | Minimum candidate marker length in bp. |
-| `--primer_gc_min` | `float` | `35.0` | Minimum global GC% a candidate's whole sequence must fall within. |
-| `--primer_gc_max` | `float` | `60.0` | Maximum global GC% a candidate's whole sequence must fall within. |
-| `--primer_window_size` | `integer` | `--kmer_size` | Local sliding-window size (bp) for the GC check. Out-of-range windows are soft-masked (lowercased), not rejected. |
-| `--primer_write_rejected` | `boolean` | `true` | Write rejected (too-short / out-of-range) candidates to their own FASTA. |
-| `--primer_plot` | `boolean` | `true` | Generate the length/GC diagnostic plot. |
+| Option                     | Type      | Default       | Description                                                                                                                                |
+| -------------------------- | --------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--primer_post_processing` | `boolean` | `false`       | Filter/mask `markers` for PCR/primer-design suitability. Off by default -- the pipeline stops at the `markers` SBWT index/FASTA otherwise. |
+| `--primer_min_length`      | `integer` | `100`         | Minimum candidate marker length in bp.                                                                                                     |
+| `--primer_gc_min`          | `float`   | `35.0`        | Minimum global GC% a candidate's whole sequence must fall within.                                                                          |
+| `--primer_gc_max`          | `float`   | `60.0`        | Maximum global GC% a candidate's whole sequence must fall within.                                                                          |
+| `--primer_window_size`     | `integer` | `--kmer_size` | Local sliding-window size (bp) for the GC check. Out-of-range windows are soft-masked (lowercased), not rejected.                          |
+| `--primer_write_rejected`  | `boolean` | `true`        | Write rejected (too-short / out-of-range) candidates to their own FASTA.                                                                   |
+| `--primer_plot`            | `boolean` | `true`        | Generate the length/GC diagnostic plot.                                                                                                    |
 
 ### Dependencies
 
@@ -247,12 +247,12 @@ Run `nextflow run main.nf --help` for the full, always-up-to-date list (rendered
 
 ## Software versions
 
-| Software | Version | Image |
-| --- | --- | --- |
-| GGCAT | 2.2.0 | `quay.io/biocontainers/ggcat:2.2.0--hf1b6044_0` |
-| SBWT (sbwt-rs-cli) | 0.4.2 | Sanger-internal `.sif` build (see [sbwt.nf](assorted-sub-workflows/themisto2/modules/sbwt.nf)) |
-| Themisto2 | 0.0.1 | `quay.io/sangerpathogens/themisto2:0.0.1` |
-| pandas / Biopython / matplotlib | 2.2.1 / 1.87 / 3.10.9 | `quay.io/sangerpathogens/pandas:2.2.1` |
+| Software                        | Version               | Image                                                                                          |
+| ------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------- |
+| GGCAT                           | 2.2.0                 | `quay.io/biocontainers/ggcat:2.2.0--hf1b6044_0`                                                |
+| SBWT (sbwt-rs-cli)              | 0.4.2                 | Sanger-internal `.sif` build (see [sbwt.nf](assorted-sub-workflows/themisto2/modules/sbwt.nf)) |
+| Themisto2                       | 0.0.1                 | `quay.io/sangerpathogens/themisto2:0.0.1`                                                      |
+| pandas / Biopython / matplotlib | 2.2.1 / 1.87 / 3.10.9 | `quay.io/sangerpathogens/pandas:2.2.1`                                                         |
 
 See `assorted-sub-workflows/themisto2/modules/` and `modules/` for pinned container versions.
 
