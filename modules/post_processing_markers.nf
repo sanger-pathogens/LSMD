@@ -19,11 +19,16 @@ process POST_PROCESS_MARKERS {
     tuple val(meta), path(plot_png),       emit: plot,     optional: true
 
     script:
+    // Nextflow DSL2 won't let a bare output-bound variable (rejected_fasta,
+    // plot_png -- needed as bare names for output: path(...) to bind to) be
+    // read again inside another expression in the same script block ("already
+    // defined in the process scope") -- so the flag strings below are built
+    // from their own def locals instead of re-referencing those bare vars.
     filtered_fasta = "${meta.ID}_filtered_markers.fasta"
     rejected_fasta = "${meta.ID}_rejected_markers.fasta"
     plot_png = "${meta.ID}_marker_analysis.png"
-    def reject_flag = params.primer_write_rejected ? "-r ${rejected_fasta}" : ""
-    def plot_flag = params.primer_plot ? "--plot -p ${plot_png}" : ""
+    def reject_flag = params.primer_write_rejected ? "-r ${meta.ID}_rejected_markers.fasta" : ""
+    def plot_flag = params.primer_plot ? "--plot -p ${meta.ID}_marker_analysis.png" : ""
     """
     ${moduleDir}/../bin/post_processing_unitigs.py \\
         ${unitigs_fasta} \\
