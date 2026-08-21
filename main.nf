@@ -30,6 +30,8 @@ def printHelp() {
 //
 include { BUILD_COLOR_INDEX } from './assorted-sub-workflows/themisto2/subworkflows/build_color_index.nf'
 include { SET_DIFF_CALCULATIONS } from './assorted-sub-workflows/themisto2/subworkflows/setdiff_filter.nf'
+include { SBWT_DUMP_UNITIGS } from './assorted-sub-workflows/themisto2/modules/sbwt.nf'
+include { POST_PROCESS_MARKERS } from './modules/post_processing_markers.nf'
 
 
 /*
@@ -72,4 +74,14 @@ workflow {
         skip: 1,
         sort: true,
     )
+
+    // Candidate marker post-processing (step09) -- off by default (see
+    // --primer_post_processing's help_text). markers (G) is one .sbwt per
+    // species/lineage combo produced by SET_DIFF_CALCULATIONS; dump each to
+    // FASTA, then filter/mask for PCR/primer-design suitability.
+    if (params.primer_post_processing) {
+        SBWT_DUMP_UNITIGS(SET_DIFF_CALCULATIONS.out.markers)
+        POST_PROCESS_MARKERS(SBWT_DUMP_UNITIGS.out.unitigs)
+    }
+    // primer3 or baitcapture tool TODO create in location: /data/pam/team230/sm71/scratch/gps_project/lsmd/modules/
 }
