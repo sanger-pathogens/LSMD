@@ -31,6 +31,19 @@ Concretely, the pipeline runs as three stages:
 
 > This mirrors the numbered `00`-`09` stage documentation kept alongside the pipeline's working data (outside this repo) -- see that doc set for the full biological rationale and worked examples behind each stage.
 
+### `BUILD_COLOR_INDEX` in detail
+
+1. **Colour mapping** (`bin/color_mapping.py` in [assorted-sub-workflows/themisto2](assorted-sub-workflows/themisto2)): matches metadata samples to assembly files on disk and writes Themisto's `--file-colors` input, ordered and grouped by `--group_label`. Always writes a species-wide index (`species_index`); optionally also writes one lineage-scoped index per group named in `--target_groups` (`lineage_index` -- see [Index B](#target-lineages---target_groups-optional) below).
+2. **GGCAT**: builds unitigs from the colour file.
+3. **SBWT**: builds the SBWT index from the unitigs, then verifies it loads correctly (`sbwt check`, split into its own lighter-weight step).
+4. **Themisto2 build**: builds the Themisto2 index from the colour file + verified SBWT index, then sanity-checks it loads (`themisto2 stats`).
+5. **Themisto2 export**: exports the index to `export.unitigs.fa`, `export.color_sets.txt` and `export.metadata.txt`.
+
+Steps 2-5 run for both `species_index` and `lineage_index` (when `--target_groups` is set) as two separate parallel pipelines -- same steps, same processes, just aliased (`*_SPECIES` / `*_GROUP`) so each can be invoked once per Nextflow workflow scope.
+
+6. **Candidate filtering** (`bin/core_catchall_filter.py`, per lineage, only when `--target_groups` is set): filters that lineage's own Step 5 export down to a candidate marker unitig FASTA using `--candidate_min_freq`/`--candidate_min_genome_count`. This is Python-derived, not yet a real index.
+7. **Candidate index rebuild**: the filtered FASTA is rebuilt through GGCAT -> SBWT build/check (a real index, `candidate_index`) -> Themisto2 build/stats (QC gate only -- confirms the rebuild is structurally sound, no export, since nothing downstream reads it). If nothing survives filtering, the FASTA is empty and this rebuild is skipped for that lineage (logged via `log.warn`).
+
 ### Current development status
 
 This pipeline is still early in development (see open TODOs in [main.nf](main.nf) and the sub-workflows):
@@ -127,6 +140,8 @@ Either a directory of assembly FASTA files, or a `.txt` file listing one assembl
 
 Comma-separated label(s) from `--group_label`, e.g. `GPSC1,GPSC2`, to build `lineage_index` for -- required for any output past `species_index`, since `SET_DIFF_CALCULATIONS` needs a lineage index to diff against. Leave empty to only build the species-wide index.
 
+`species_index` scales poorly once a species has many groups -- S. pneumoniae alone has 765+ GPSCs. `--target_groups` lets you additionally build colour files scoped to just the lineages you care about, without re-running the whole pipeline per lineage. Setting `--target_groups` does not skip or shrink the species-wide build -- `species_index` is always built regardless; the per-group colour files are fanned out (one Nextflow channel item per lineage) into the same GGCAT -> SBWT -> Themisto2 build/stats/export chain `species_index` uses, then each lineage's own export feeds candidate filtering + rebuild (steps 6-7 above).
+
 #### Background index (`--bg_index`, `--bg_excl_index`)
 
 `--bg_index` (default: a pre-built ATB SBWT index on the Sanger farm) is what `bg_excl`/`markers` are diffed against. If you've already computed `bg_excl` for this species in a previous run, pass it directly via `--bg_excl_index` to skip re-running that hugemem-scale diff. Both must be built at the same `--kmer_size` as the rest of the pipeline's indexes (default `31`).
@@ -177,7 +192,21 @@ results/
 | `<lineage>_rejected_markers.fasta`          | `--primer_post_processing` and `--primer_write_rejected` |
 | `<lineage>_marker_analysis.png`             | `--primer_post_processing` and `--primer_plot`           |
 
-See the [themisto2 sub-workflow README](assorted-sub-workflows/themisto2/README.md) for the full `stats.json` field reference and `lineage_index` directory layout.
+#### `stats.json` fields
+
+Every `index_species/` and `index_target_group/<group>/` directory (under `colour_mapping/<ID>/`) gets its own `stats.json`. Some fields only make sense at species-wide scope -- a sample with no label, or an assembly with no metadata row at all, can't be attributed to one specific group, so those fields are simply omitted (not reported as `0`) from per-group `stats.json` files.
+
+| field                                   | species-wide | per-group | meaning                                                                                                                                |
+| --------------------------------------- | ------------ | --------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `index_type`                            | always       | always    | `"species"` or `"target_group"`                                                                                                        |
+| `target_group`                          | always       | always    | `"species_wide"`, or the group's label                                                                                                  |
+| `metadata_column`                       | always       | always    | the `--group_label` value used                                                                                                          |
+| `samples_dropped_missing_label`         | always       | omitted   | samples with no value in `--group_label` at all                                                                                         |
+| `samples_dropped_missing_assembly`      | always       | always    | samples with a label but no matching assembly on disk -- this one genuinely varies by group, so per-group indexes get their own count   |
+| `assemblies_excluded_missing_metadata`  | always       | omitted   | assembly files on disk with no matching metadata row                                                                                    |
+| `total_assemblies_written`              | always       | always    | assemblies actually written to this index's `file_colors_input.txt`                                                                     |
+
+For the Nextflow channel-level contract (`metadata_ch`/`assembly_ch` in, `sbwt_index`/`lineage_index`/`candidate_index` out) that `BUILD_COLOR_INDEX` exposes for wiring into a parent pipeline, see the [themisto2 sub-workflow README](assorted-sub-workflows/themisto2/README.md).
 
 ### Parameters
 
