@@ -32,6 +32,7 @@ include { BUILD_COLOR_INDEX } from './assorted-sub-workflows/themisto2/subworkfl
 include { SET_DIFF_CALCULATIONS } from './assorted-sub-workflows/themisto2/subworkflows/setdiff_filter.nf'
 include { SBWT_DUMP_UNITIGS } from './assorted-sub-workflows/themisto2/modules/sbwt.nf'
 include { POST_PROCESS_MARKERS } from './modules/post_processing_markers.nf'
+include { DESIGN_PRIMERS } from './modules/primer3.nf'
 
 
 /*
@@ -82,6 +83,15 @@ workflow {
     if (params.primer_post_processing) {
         SBWT_DUMP_UNITIGS(SET_DIFF_CALCULATIONS.out.markers)
         POST_PROCESS_MARKERS(SBWT_DUMP_UNITIGS.out.unitigs)
+
+        // Primer3 design (step10) -- off by default, and only meaningful once
+        // POST_PROCESS_MARKERS has actually run (it needs the non_designable
+        // coordinates from that step's FASTA headers). Runs on the passed/filtered
+        // markers only -- rejected markers (too short/global-GC-out-of-range)
+        // are never worth designing primers against.
+        if (params.primer3_design) {
+            DESIGN_PRIMERS(POST_PROCESS_MARKERS.out.filtered)
+        }
     }
-    // primer3 or baitcapture tool TODO create in location: /data/pam/team230/sm71/scratch/gps_project/lsmd/modules/
+    // baitcapture tool TODO create in location: /data/pam/team230/sm71/scratch/gps_project/lsmd/modules/
 }
