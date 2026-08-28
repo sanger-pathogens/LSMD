@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from Bio import SeqIO
-from Bio.SeqUtils import GC
+from Bio.SeqUtils import gc_fraction
 
 
 @dataclass
@@ -37,7 +37,7 @@ class UnitigResult:
 
 def calculate_gc(seq: str) -> float:
     """Calculate GC% for a sequence(unitig)"""
-    return GC(seq)
+    return gc_fraction(seq) * 100
 
 
 def find_non_designable_windows(seq: str, window_size: int, min_gc: float, max_gc: float) -> List[Tuple[int, int]]:
@@ -59,7 +59,7 @@ def find_non_designable_windows(seq: str, window_size: int, min_gc: float, max_g
     regions = []
     for i in range(len(seq) - window_size + 1):
         window_end = i + window_size
-        window_gc = GC(seq[i:window_end])
+        window_gc = gc_fraction(seq[i:window_end]) * 100
         if not (min_gc <= window_gc <= max_gc):
             regions.append((i, window_end))
 
