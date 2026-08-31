@@ -5,14 +5,18 @@ Filter and rank candidate unitigs based on:
 - Length >= threshold (default: 100bp)
 - Global GC content 35-60 %
 - Sliding-window GC (31bp, kmer resolution) is not a reject -- out-of-range
-  windows are flagged as non-designable coordinates instead (primer design
-  should avoid them, rest of the unitig stays usable). Per Vignesh Shetty.
+  windows are soft-masked (lowercased) in the output FASTA instead, and their
+  coordinates listed in the header. The rest of the unitig stays uppercase and
+  usable; primer3 (run with PRIMER_LOWERCASE_MASKING=1) then keeps primer 3'
+  ends off the masked bases while still allowing a pair to flank them.
+  Per Vignesh Shetty.
 
 (ranking is length first then GC balance)
 Biopython
 Use package SeqIO to parse FASTA format
 Use package SeqUtils to calculate GC%
 """
+
 import argparse
 import sys
 from dataclasses import dataclass, field
@@ -43,11 +47,11 @@ def calculate_gc(seq: str) -> float:
 def find_non_designable_windows(seq: str, window_size: int, min_gc: float, max_gc: float) -> List[Tuple[int, int]]:
     """
     Find sliding-window coordinates whose GC% falls outside range -- these get
-    flagged as non-designable, not used to reject the whole unitig.
+    soft-masked, not used to reject the whole unitig.
 
     Precondition: len(seq) >= window_size (caller's job to filter length first).
 
-    Returns: list of (start, end) 0-based half-open coordinate pairs.
+    Returns: merged list of (start, end) 0-based half-open coordinate pairs.
     """
     seq = seq.upper()
     if len(seq) < window_size:
@@ -63,7 +67,39 @@ def find_non_designable_windows(seq: str, window_size: int, min_gc: float, max_g
         if not (min_gc <= window_gc <= max_gc):
             regions.append((i, window_end))
 
-    return regions
+    return merge_windows(regions)
+
+
+def merge_windows(regions: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+    """Collapse the overlapping 1bp-stepped windows into contiguous runs.
+
+    find_non_designable_windows appends one (start, end) per failing position, so
+    a single bad stretch comes out as ~window_size overlapping pairs. Merge them
+    so the header and the soft-mask both work off a handful of real regions.
+    Input is already sorted by start (scan order).
+    """
+    merged: List[Tuple[int, int]] = []
+    for start, end in regions:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def soft_mask(seq: str, regions: List[Tuple[int, int]]) -> str:
+    """Lowercase every base inside a non-designable region; the rest stays upper.
+
+    primer3 with PRIMER_LOWERCASE_MASKING=1 won't anchor a primer's 3' end on a
+    lowercase base but will still place a pair that flanks the region, so the
+    whole fragment stays usable -- per Vignesh Shetty's spec.
+    """
+    chars = list(seq.upper())
+    n = len(chars)
+    for start, end in regions:
+        for i in range(start, min(end, n)):
+            chars[i] = chars[i].lower()
+    return "".join(chars)
 
 
 def filter_unitigs(
@@ -73,8 +109,8 @@ def filter_unitigs(
     max_gc: float = 60.0,
     window_size: int = 31,
 ) -> Tuple[List[UnitigResult], List[UnitigResult]]:
-    # Filter unitigs by length and global GC content; flag (don't reject) local
-    # sliding-window GC dips as non-designable coordinates.
+    # Filter unitigs by length and global GC content; soft-mask (don't reject)
+    # local sliding-window GC dips as non-designable regions.
 
     # find_non_designable_windows requires len(seq) >= window_size -- guaranteed
     # by the length filter below only if window_size <= min_length.
@@ -109,7 +145,8 @@ def filter_unitigs(
             )
             continue
 
-        # Sliding-window GC third: flag non-designable coordinates, don't reject.
+        # Sliding-window GC third: record non-designable regions (soft-masked
+        # in write_output), don't reject.
         non_designable = find_non_designable_windows(seq_str, window_size, min_gc, max_gc)
 
         passed.append(UnitigResult(record.id, seq_str, gc_pct, seq_len, non_designable=non_designable))
@@ -121,12 +158,17 @@ def filter_unitigs(
 
 
 def write_output(results: List[UnitigResult], output_path: str):
-    """Write filtered unitigs to FASTA with ranking + non-designable coordinates."""
+    """Write filtered unitigs to FASTA: sequence soft-masked (non-designable
+    windows lowercased), ranking + non-designable coordinates in the header."""
     with open(output_path, "w") as f:
         for rank, r in enumerate(results, 1):
             regions = ",".join(f"{s}-{e}" for s, e in r.non_designable) or "none"
-            f.write(f">{r.id} rank={rank} length={r.length} gc={r.gc_pct:.2f} non_designable={regions}\n")
-            f.write(f"{r.seq}\n")
+            masked_bp = sum(e - s for s, e in r.non_designable)
+            f.write(
+                f">{r.id} rank={rank} length={r.length} gc={r.gc_pct:.2f} "
+                f"masked_bp={masked_bp} non_designable={regions}\n"
+            )
+            f.write(f"{soft_mask(r.seq, r.non_designable)}\n")
 
 
 def write_rejected(rejected: List[UnitigResult], output_path: str):
