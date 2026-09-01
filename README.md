@@ -145,7 +145,7 @@ Comma-separated label(s) from `--group_label`, e.g. `GPSC1,GPSC2`, to build `lin
 
 #### Background index (`--bg_index`, `--bg_excl_index`)
 
-`--bg_index` (default: a pre-built ATB SBWT index on the Sanger farm) is what `bg_excl`/`markers` are diffed against. If you've already computed `bg_excl` for this species in a previous run, pass it directly via `--bg_excl_index` to skip re-running that hugemem-scale diff. Both must be built at the same `--kmer_size` as the rest of the pipeline's indexes (default `31`).
+`--bg_index` (default: a pre-built ATB SBWT index on the Sanger farm) is what `bg_excl`/`markers` are diffed against. If you've already computed `bg_excl` for this species in a previous run, pass it directly via `--bg_excl_index` to skip re-running that hugemem-scale diff. Both must be built at the same `--color_index_kmer_size` as the rest of the pipeline's indexes (default `31`).
 
 ### Output
 
@@ -242,7 +242,7 @@ Run `nextflow run main.nf --help` for the full, always-up-to-date list (rendered
 
 | Option                         | Type      | Default | Description                                                                                                                           |
 | ------------------------------ | --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `--kmer_size`                  | `integer` | `31`    | k-mer size used consistently across GGCAT, SBWT and Themisto2. Must match the background index.                                       |
+| `--color_index_kmer_size`                | `integer` | `31`    | k-mer size used consistently across GGCAT, SBWT and Themisto2. Must match the background index.                                       |
 | `--gzip_export`                | `boolean` | `false` | Gzip the Themisto2 export's `color_sets.txt`.                                                                                         |
 | `--temp_dir`                   | `path`    | `""`    | Scratch root for GGCAT/SBWT temp/working dirs. Falls back to a task-local work dir; only set for full background-DB-scale runs.       |
 | `--candidate_min_freq`         | `string`  | `core`  | Presence-fraction preset (`core` ≥0.95, `relaxed` ≥0.5, `catchall` ≥1 genome) or a literal fraction, for `candidate_index` filtering. |
@@ -267,7 +267,7 @@ Run `nextflow run main.nf --help` for the full, always-up-to-date list (rendered
 | `--primer_min_length`      | `integer` | `100`         | Minimum candidate marker length in bp.                                                                                                     |
 | `--primer_gc_min`          | `float`   | `35.0`        | Minimum global GC% a candidate's whole sequence must fall within.                                                                          |
 | `--primer_gc_max`          | `float`   | `60.0`        | Maximum global GC% a candidate's whole sequence must fall within.                                                                          |
-| `--primer_window_size`     | `integer` | `--kmer_size` | Local sliding-window size (bp) for the GC check. Out-of-range windows are soft-masked (lowercased), not rejected.                          |
+| `--primer_window_size`     | `integer` | `--color_index_kmer_size` | Local sliding-window size (bp) for the GC check. Out-of-range windows are soft-masked (lowercased), not rejected.                          |
 | `--primer_write_rejected`  | `boolean` | `true`        | Write rejected (too-short / out-of-range) candidates to their own FASTA.                                                                   |
 | `--primer_plot`            | `boolean` | `true`        | Generate the length/GC diagnostic plot.                                                                                                    |
 
@@ -275,7 +275,7 @@ Run `nextflow run main.nf --help` for the full, always-up-to-date list (rendered
 
 - Nextflow ≥ 21.04.0
 - All software dependencies are containerised (Docker/Singularity images).
-- Step08 requires a pre-built background SBWT index at the same `--kmer_size` (Sanger HPC default: ATB, via `--bg_index`).
+- Step08 requires a pre-built background SBWT index at the same `--color_index_kmer_size` (Sanger HPC default: ATB, via `--bg_index`).
 
 ## Software versions
 

@@ -25,8 +25,8 @@
         "help_text": "Maximum global GC%% a candidate marker's whole sequence must fall within."
       },
       "primer_window_size": {
-        "default": "same as --kmer_size",
-        "help_text": "Local sliding-window size (bp) for the non-designable-region GC check. Windows outside primer_gc_min-primer_gc_max are soft-masked (lowercased) in the output FASTA, not rejected -- primer3 runs with PRIMER_LOWERCASE_MASKING=1 so a primer's 3' end can't sit on a masked base but the rest of the candidate stays usable. Defaults to kmer_size (k-mer resolution)."
+        "default": "same as --color_index_kmer_size",
+        "help_text": "Local sliding-window size (bp) for the non-designable-region GC check. Windows outside primer_gc_min-primer_gc_max are soft-masked (lowercased) in the output FASTA, not rejected -- primer3 runs with PRIMER_LOWERCASE_MASKING=1 so a primer's 3' end can't sit on a masked base but the rest of the candidate stays usable. Defaults to color_index_kmer_size (k-mer resolution)."
       },
       "primer_write_rejected": {
         "default": "true",
