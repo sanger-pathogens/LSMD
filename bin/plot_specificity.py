@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 """
-Specificity score figures for a core_catchall_filter.py E output.
+Specificity score figures for a lineage_specificity_score.py output.
 
-score = core_pct - outside_pct (Youden's J): +1 = perfect marker (100% of the
+Input is '{lineage_id}_specificity.tsv' -- one row per unitig in the
+SPECIES-WIDE export graph (NOT the lineage-core candidate set E from
+core_catchall_filter.py, which is an independently-built graph with different
+unitig IDs). It's a self-consistent species-wide diagnostic view of how
+discriminating each unitig would be for this lineage.
+
+score = within_pct - outside_pct (Youden's J): +1 = perfect marker (100% of the
 target lineage, 0% of everything else); 0 = no discriminating power; negative
 = the unitig is actually more common outside the lineage than inside it.
 
 Usage:
-    python3 plot_specificity.py --specificity <lineage>_<mode>_specificity.tsv \
-        --label <e.g. v_cholerae_sublineage_1.0_E> --display-name <e.g. 'V. cholerae -- lineage 1.0'> \
+    python3 plot_specificity.py --specificity <lineage_id>_specificity.tsv \
+        --label <e.g. v_cholerae_sublineage_1.0> --display-name <e.g. 'V. cholerae -- lineage 1.0'> \
         --mode core --out-dir <dir>
 """
 
@@ -32,7 +38,9 @@ THRESHOLD_COLOR = "#e34948"  # palette slot 8, red -- reserved/status-style refe
 
 GOOD_SPECIFICITY_THRESHOLD = 0.9
 
-PREVIEW_NOTE = "PREVIEW on E (lineage-core candidates) — cross-lineage exclusion " "(F = E − D) not yet applied"
+PREVIEW_NOTE = (
+    "Species-wide diagnostic — every unitig in the species graph scored " "for this lineage; not the candidate set E"
+)
 
 
 def parse_args():
@@ -41,10 +49,11 @@ def parse_args():
         "--specificity",
         required=True,
         type=Path,
-        help="'{lineage_id}_{mode}_specificity.tsv' from core_catchall_filter.py "
-        "(columns: unitig_id, core_pct, outside_pct, specificity_score)",
+        help="'{lineage_id}_specificity.tsv' from lineage_specificity_score.py "
+        "(columns: unitig_id, within_pct, outside_pct, specificity_score); "
+        "one row per species-wide export unitig",
     )
-    p.add_argument("--label", required=True, help="Short identifier for filenames, e.g. v_cholerae_sublineage_1.0_E")
+    p.add_argument("--label", required=True, help="Short identifier for filenames, e.g. v_cholerae_sublineage_1.0")
     p.add_argument(
         "--display-name",
         required=True,
@@ -54,8 +63,8 @@ def parse_args():
         "--mode",
         required=True,
         choices=["core", "relaxed", "catchall"],
-        help="Threshold mode used to build E, shown on every figure so "
-        "it's unambiguous if the figure is shared without context",
+        help="within-lineage threshold mode of the companion core_catchall_filter "
+        "run, shown on every figure for context if it's shared without it",
     )
     p.add_argument(
         "--good-threshold",
@@ -87,14 +96,14 @@ def main():
     threshold = args.good_threshold
 
     data = np.loadtxt(args.specificity, skiprows=1, usecols=(1, 2, 3))
-    core_pct, outside_pct, score = data[:, 0], data[:, 1], data[:, 2]
+    within_pct, outside_pct, score = data[:, 0], data[:, 1], data[:, 2]
     n = len(score)
     n_good = int((score >= threshold).sum())
     n_neg = int((score < 0).sum())
 
     stats_lines = [
-        f"n unitigs (E, {args.mode} mode) : {n:,}",
-        f"core_pct range          : {core_pct.min():.3f} - {core_pct.max():.3f}",
+        f"n unitigs scored (species-wide graph) : {n:,}",
+        f"within_pct range        : {within_pct.min():.3f} - {within_pct.max():.3f}",
         f"outside_pct range       : {outside_pct.min():.3f} - {outside_pct.max():.3f}",
         f"specificity_score min   : {score.min():.4f}",
         f"specificity_score median: {np.median(score):.4f}",
@@ -109,10 +118,10 @@ def main():
     fig_fmt = dict(figsize=(9, 4.6), dpi=200)
 
     # --- Figure 1: log-count histogram, full range -----------------------------
-    # Almost all candidates sit in a narrow spike around score=0 -- they pass
-    # the "core" (within-lineage) threshold but are just as common outside the
-    # lineage, so they carry no discriminating power. The unitigs that actually
-    # make good diagnostic markers are a thin tail out near score=1. A
+    # Almost all species-wide unitigs sit in a narrow spike around score=0 --
+    # present within the lineage but just as common outside it, so they carry
+    # no discriminating power. The unitigs that actually make good diagnostic
+    # markers are a thin tail out near score=1. A
     # linear-count histogram renders that tail as invisible; log-count keeps
     # the near-zero spike AND resolves the tail in the same panel, without
     # touching the x-axis (score is bounded, not heavy-tailed itself -- only
@@ -131,10 +140,10 @@ def main():
         va="top",
         ha="left",
     )
-    ax.set_xlabel("Specificity score (core_pct − outside_pct)")
+    ax.set_xlabel("Specificity score (within_pct − outside_pct)")
     ax.set_ylabel("Count (log scale)")
     ax.set_title(
-        f"{args.display_name} — candidate marker specificity, {args.mode} mode (n={n:,})",
+        f"{args.display_name} — species-wide unitig specificity, {args.mode} mode (n={n:,})",
         color=TEXT_PRIMARY,
         fontsize=11,
         loc="left",
@@ -156,8 +165,9 @@ def main():
     plt.close(fig)
 
     # --- Figure 2: survival curve (fraction clearing a given score) ------------
-    # Answers the practical question directly: what fraction of E's candidates
-    # are actually usable as lineage-specific markers, at any given cutoff.
+    # Answers the practical question directly: what fraction of the species-wide
+    # unitigs are usable as lineage-specific markers at any given cutoff --
+    # i.e. marker yield vs specificity stringency.
     sorted_scores = np.sort(score)
     cdf = np.arange(1, n + 1) / n
     survival = 1.0 - cdf
@@ -168,7 +178,7 @@ def main():
     ax.axvline(threshold, color=THRESHOLD_COLOR, linewidth=1.5, linestyle=(0, (4, 2)), zorder=3)
     ax.axhline(frac_good, color=THRESHOLD_COLOR, linewidth=1, alpha=0.5, linestyle=(0, (1, 2)), zorder=1)
     ax.annotate(
-        f"{frac_good * 100:.2f}% of candidates are high-specificity (score ≥ {threshold:g})",
+        f"{frac_good * 100:.2f}% of unitigs are high-specificity (score ≥ {threshold:g})",
         xy=(threshold, frac_good),
         xytext=(-10, 25),
         ha="right",
@@ -179,10 +189,10 @@ def main():
     )
     ax.set_ylim(0, 1.02)
     ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
-    ax.set_xlabel("Specificity score cutoff (core_pct − outside_pct)")
-    ax.set_ylabel("Fraction of candidates ≥ cutoff")
+    ax.set_xlabel("Specificity score cutoff (within_pct − outside_pct)")
+    ax.set_ylabel("Fraction of unitigs ≥ cutoff")
     ax.set_title(
-        f"{args.display_name} — candidate markers clearing a specificity cutoff, {args.mode} mode (n={n:,})",
+        f"{args.display_name} — marker yield vs specificity stringency, {args.mode} mode (n={n:,})",
         color=TEXT_PRIMARY,
         fontsize=11,
         loc="left",
