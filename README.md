@@ -243,7 +243,6 @@ Run `nextflow run main.nf --help` for the full, always-up-to-date list (rendered
 | Option                         | Type      | Default | Description                                                                                                                           |
 | ------------------------------ | --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | `--color_index_kmer_size`      | `integer` | `31`    | k-mer size used consistently across GGCAT, SBWT and Themisto2. Must match the background index.                                       |
-| `--gzip_export`                | `boolean` | `false` | Gzip the Themisto2 export's `color_sets.txt`.                                                                                         |
 | `--temp_dir`                   | `path`    | `""`    | Scratch root for GGCAT/SBWT temp/working dirs. Falls back to a task-local work dir; only set for full background-DB-scale runs.       |
 | `--candidate_min_freq`         | `string`  | `core`  | Presence-fraction preset (`core` ≥0.95, `relaxed` ≥0.5, `catchall` ≥1 genome) or a literal fraction, for `candidate_index` filtering. |
 | `--candidate_min_genome_count` | `integer` | `5`     | Absolute genome-count floor for `candidate_index` filtering, alongside `--candidate_min_freq`.                                        |
