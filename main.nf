@@ -45,27 +45,21 @@ workflow {
         exit 0
     }
 
-    // Input: either a --manifest TSV (one row per species) or the single-species
-    // --metadata / --assembly_input params directly.
+    // BUILD_COLOR_INDEX takes one pre-paired item per species:
+    //   [ [ID: species, target_groups: <csv>], metadata_file, assembly_input ]
+    // Either from a --manifest TSV (one row per species) or, for a single species,
+    // built from the --metadata / --assembly_input / --target_groups params.
     if (params.manifest) {
         MANIFEST_PARSE(params.manifest)
-        // TODO (PAT-3569 ASW side): pass MANIFEST_PARSE.out.samples straight through so
-        // BUILD_COLOR_INDEX gets meta.id (species -> output folder) and per-species
-        // meta.target_groups, instead of splitting it back out into the two channels
-        // below and deriving the folder from the metadata basename + a global
-        // params.target_groups.
-        MANIFEST_PARSE.out.samples
-            .multiMap { meta, metadata, assemblies ->
-                metadata: metadata
-                assembly: assemblies
-            }
-            .set { mf }
-        metadata_ch = mf.metadata
-        assembly_ch = mf.assembly
+        samples_ch = MANIFEST_PARSE.out.samples
     } else {
-        metadata_ch = Channel.fromPath(params.metadata)
-        assembly_ch = Channel.fromPath(params.assembly_input)
+        // Single species: ID defaults to the metadata file's basename.
+        samples_ch = Channel.of([
+            [ID: file(params.metadata).baseName, target_groups: params.target_groups ?: ''],
+            file(params.metadata),
+            file(params.assembly_input),
+        ])
     }
 
-    BUILD_COLOR_INDEX(metadata_ch, assembly_ch)
+    BUILD_COLOR_INDEX(samples_ch)
 }

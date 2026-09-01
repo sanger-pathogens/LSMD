@@ -7,13 +7,8 @@
 //   target_groups  optional, comma-separated lineage labels for that species
 //                  (e.g. "GPSC1,GPSC2"); empty = species-wide only
 //
-// Emits one tuple per row:
-//   [ [id: <species>, target_groups: <string>], <metadata file>, <assemblies path> ]
-//
-// TODO (PAT-3569 ASW side): BUILD_COLOR_INDEX still takes two separate channels and
-// combine()s them, so it only handles one species per run and derives its folder
-// name from the metadata basename, not `id`. Until it takes this pre-paired channel,
-// MANIFEST_PARSE enforces a single row -- see the guard in main.nf.
+// Emits one tuple per row, the shape BUILD_COLOR_INDEX's samples_ch expects:
+//   [ [ID: <species>, target_groups: <string>], <metadata file>, <assemblies path> ]
 
 def parse_manifest_row(row) {
     def species = (row.species ?: "").trim()
@@ -37,7 +32,7 @@ def parse_manifest_row(row) {
 
     def target_groups = (row.target_groups ?: "").trim()
 
-    return [[id: species, target_groups: target_groups], metadata, assemblies]
+    return [[ID: species, target_groups: target_groups], metadata, assemblies]
 }
 
 workflow MANIFEST_PARSE {
@@ -47,23 +42,9 @@ workflow MANIFEST_PARSE {
     main:
     Channel.fromPath(manifest, checkIfExists: true)
         | splitCsv(header: true, sep: '\t', strip: true)
-        | toList
-        | map { rows ->
-            if (rows.isEmpty()) {
-                error("manifest has no data rows: ${manifest}")
-            }
-            // Single-species guard -- drop once the ASW side takes a per-species channel.
-            if (rows.size() > 1) {
-                error("manifest has ${rows.size()} rows -- multi-species runs need the "
-                    + "PAT-3569 ASW change (BUILD_COLOR_INDEX taking a pre-paired "
-                    + "channel). Use a one-row manifest for now.")
-            }
-            rows
-        }
-        | flatMap { it }
         | map { row -> parse_manifest_row(row) }
         | set { samples }
 
     emit:
-    samples   // [ [id, target_groups], metadata, assemblies ]
+    samples   // [ [ID, target_groups], metadata, assemblies ]
 }
