@@ -33,6 +33,7 @@ include { SET_DIFF_CALCULATIONS } from './assorted-sub-workflows/themisto2/subwo
 include { SBWT_DUMP_UNITIGS } from './assorted-sub-workflows/themisto2/modules/sbwt.nf'
 include { POST_PROCESS_MARKERS } from './modules/post_processing_markers.nf'
 include { DESIGN_PRIMERS } from './modules/primer3.nf'
+include { CHECKPOINT_COUNT } from './assorted-sub-workflows/themisto2/modules/checkpoint_count.nf'
 
 
 /*
@@ -65,16 +66,9 @@ workflow {
     )
 
     // Per-stage count checkpoints -> one funnel TSV of this run's own numbers.
-    BUILD_COLOR_INDEX.out.checkpoints
-    | mix(SET_DIFF_CALCULATIONS.out.checkpoints)
-    | map { meta, row -> row }
-    | collectFile(
-        name: 'pipeline_counts.tsv',
-        storeDir: "${params.outdir}/checkpoints",
-        keepHeader: true,
-        skip: 1,
-        sort: true,
-    )
+    // Accumulate rows from every stage, then collectFile once at the end.
+    checkpoint_rows = BUILD_COLOR_INDEX.out.checkpoints
+        .mix(SET_DIFF_CALCULATIONS.out.checkpoints)
 
     // Candidate marker post-processing (step09) -- off by default (see
     // --primer_post_processing's help_text). markers (G) is one .sbwt per
@@ -83,6 +77,16 @@ workflow {
     if (params.primer_post_processing) {
         SBWT_DUMP_UNITIGS(SET_DIFF_CALCULATIONS.out.markers)
         POST_PROCESS_MARKERS(SBWT_DUMP_UNITIGS.out.unitigs)
+
+        // Checkpoint the post-processing funnel: G dumped to FASTA -> markers
+        // passing / rejected by the length + GC filter.
+        SBWT_DUMP_UNITIGS.out.unitigs.map    { meta, f -> [meta, 'G_markers_09_dumped_fasta', 'fasta', f] }
+        | mix( POST_PROCESS_MARKERS.out.filtered.map { meta, f -> [meta, 'H_markers_09_postproc_pass', 'fasta', f] } )
+        | mix( POST_PROCESS_MARKERS.out.rejected.map { meta, f -> [meta, 'H_markers_09_postproc_reject', 'fasta', f] } )
+        | set { postproc_checkpoint_inputs }
+
+        CHECKPOINT_COUNT(postproc_checkpoint_inputs)
+        checkpoint_rows = checkpoint_rows.mix(CHECKPOINT_COUNT.out.row)
 
         // Primer3 design (step10) -- off by default, and only meaningful once
         // POST_PROCESS_MARKERS has actually run (it needs the non_designable
@@ -93,5 +97,15 @@ workflow {
             DESIGN_PRIMERS(POST_PROCESS_MARKERS.out.filtered)
         }
     }
+
+    checkpoint_rows
+    | map { meta, row -> row }
+    | collectFile(
+        name: 'pipeline_counts.tsv',
+        storeDir: "${params.outdir}/checkpoints",
+        keepHeader: true,
+        skip: 1,
+        sort: true,
+    )
     // baitcapture tool TODO create in location: /data/pam/team230/sm71/scratch/gps_project/lsmd/modules/
 }
