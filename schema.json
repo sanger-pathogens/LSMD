@@ -1,6 +1,12 @@
 {
   "pipeline": "Base schema",
   "params": {
+    "Input options": {
+      "manifest": {
+        "default": "null",
+        "help_text": "Run manifest: a TSV with a header row and one data row per species. Columns: species (used as the output folder name), metadata (path to a .tsv/.csv), assemblies (path to a directory or a .txt list), target_groups (optional, comma-separated lineage labels). When unset, use --metadata / --assembly_input directly for a single species. Multi-row manifests are not supported yet (see PAT-3569)."
+      }
+    },
     "Logging options": {
       "monochrome_logs": {
         "default": "false",

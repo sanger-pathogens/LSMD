@@ -29,6 +29,7 @@ def printHelp() {
 // SUBWORKFLOWS
 //
 include { BUILD_COLOR_INDEX } from './assorted-sub-workflows/themisto2/subworkflows/build_color_index.nf'
+include { MANIFEST_PARSE } from './subworkflows/manifest_parse.nf'
 
 
 /*
@@ -44,10 +45,27 @@ workflow {
         exit 0
     }
 
-    // Input channels from params. TODO: single metadata/assembly pair only --
-    // manifest/samplesheet channel for multi-run is PAT-3553 / PAT-3569.
-    metadata_ch = Channel.fromPath(params.metadata)
-    assembly_ch = Channel.fromPath(params.assembly_input)
+    // Input: either a --manifest TSV (one row per species) or the single-species
+    // --metadata / --assembly_input params directly.
+    if (params.manifest) {
+        MANIFEST_PARSE(params.manifest)
+        // TODO (PAT-3569 ASW side): pass MANIFEST_PARSE.out.samples straight through so
+        // BUILD_COLOR_INDEX gets meta.id (species -> output folder) and per-species
+        // meta.target_groups, instead of splitting it back out into the two channels
+        // below and deriving the folder from the metadata basename + a global
+        // params.target_groups.
+        MANIFEST_PARSE.out.samples
+            .multiMap { meta, metadata, assemblies ->
+                metadata: metadata
+                assembly: assemblies
+            }
+            .set { mf }
+        metadata_ch = mf.metadata
+        assembly_ch = mf.assembly
+    } else {
+        metadata_ch = Channel.fromPath(params.metadata)
+        assembly_ch = Channel.fromPath(params.assembly_input)
+    }
 
     BUILD_COLOR_INDEX(metadata_ch, assembly_ch)
 }
