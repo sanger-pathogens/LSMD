@@ -4,26 +4,25 @@
 Design PCR primer pairs for candidate marker sequences using primer3_core.
 
 Input: a POST_PROCESS_MARKERS filtered-markers FASTA
-('{lineage_id}_filtered_markers.fasta') -- headers carry
-'non_designable=<start>-<end>,...' coordinates from post_processing_unitigs.py's
-sliding-window GC check. Those regions are passed to primer3 as
-SEQUENCE_EXCLUDED_REGION so no primer is ever placed across a locally
-GC-imbalanced stretch, without re-deriving anything post_processing_unitigs.py
-already worked out.
+('{lineage_id}_filtered_markers.fasta') from post_processing_unitigs.py. Locally
+GC-imbalanced windows are soft-masked (lowercased) in that FASTA. primer3 is run
+with PRIMER_LOWERCASE_MASKING=1, so it will not anchor a primer's 3' end on a
+masked base but a pair may still flank a masked window -- the whole marker stays
+in play, per Vignesh Shetty's spec. (This replaced an earlier approach that split
+each marker into clean sub-segments and designed within them, which threw away
+every pair that would have bracketed a short bad window.)
 
 All markers are batched into one Boulder-IO input and one primer3_core call
-(not one process invocation per marker) -- primer3_core's own startup cost
-dwarfs the per-record design time, so batching is the difference between
-seconds and minutes for a few thousand markers.
+(not one invocation per marker) -- primer3_core's startup cost dwarfs the
+per-record design time, so batching is the difference between seconds and
+minutes for a few thousand markers.
 
-A marker primer3 can't find a valid pair for (SEQUENCE_ID present in the
-output with no PRIMER_LEFT_0_SEQUENCE, or a nonzero PRIMER_ERROR field) is
-not a script error -- it's written to the "no primers" summary, and design
-continues for the rest.
+A marker primer3 can't find a valid pair for is not a script error -- it's
+written to the "no primers" summary with primer3's own PRIMER_*_EXPLAIN
+diagnostics, and design continues for the rest.
 
 Output: '{label}_primers.tsv' (one row per returned primer pair, ranked by
-primer3's own pair penalty) and '{label}_no_primers.tsv' (markers primer3
-returned zero pairs for, with primer3's own PRIMER_*_EXPLAIN diagnostics).
+primer3's own pair penalty) and '{label}_no_primers.tsv'.
 """
 
 import argparse
@@ -34,20 +33,20 @@ from pathlib import Path
 from typing import Dict, Iterator, List, Tuple
 
 ##############################################################################
-### FASTA -> Boulder-IO input
+# FASTA -> Boulder-IO input
 
 
 @dataclass
 class FastaRecord:
     id: str
     description: str  # full header line, id included, no leading '>'
-    seq: str
+    seq: str  # case preserved -- lowercase = soft-masked non-designable region
 
 
 def parse_fasta(path: Path) -> Iterator[FastaRecord]:
-    """Minimal FASTA reader -- the only thing needed here is id/header/sequence,
-    so no Biopython dependency (keeps this script running in the bare
-    primer3_core container, no second package/install needed at runtime)."""
+    """Minimal FASTA reader -- no Biopython dependency, so this keeps running in
+    the bare primer3_core container. Sequence case is preserved deliberately:
+    the soft-mask from post_processing_unitigs.py is what primer3 keys off."""
     header: str = None
     seq_lines: List[str] = []
     with open(path) as fh:
@@ -66,92 +65,8 @@ def parse_fasta(path: Path) -> Iterator[FastaRecord]:
             yield FastaRecord(header.split()[0], header, "".join(seq_lines))
 
 
-def parse_non_designable(field: str) -> List[Tuple[int, int]]:
-    """'123-154,301-332' -> [(123, 154), (301, 332)]; 'none' -> []."""
-    if field == "none":
-        return []
-    regions = []
-    for pair in field.split(","):
-        start, end = pair.split("-")
-        regions.append((int(start), int(end)))
-    return regions
-
-
-def merge_intervals(intervals: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
-    """Collapse overlapping/adjacent (start, end) pairs into contiguous runs.
-
-    post_processing_unitigs.py's non_designable coordinates are raw
-    sliding-window hits (one 31bp window per failing position, stepped by
-    1bp) -- a long low-complexity stretch can produce thousands of heavily
-    overlapping windows for what is really one contiguous bad region.
-    Primer3's SEQUENCE_EXCLUDED_REGION has a hard cap on the number of
-    intervals it will accept per sequence; passing the raw window list
-    through unmerged risks silently overrunning that cap (or just wasting
-    thousands of redundant intervals on real ones). Same merge used for the
-    masked-bp stats reported alongside POST_PROCESS_MARKERS' results.
-    """
-    if not intervals:
-        return []
-    intervals = sorted(intervals)
-    merged = [intervals[0]]
-    for start, end in intervals[1:]:
-        last_start, last_end = merged[-1]
-        if start <= last_end:
-            merged[-1] = (last_start, max(last_end, end))
-        else:
-            merged.append((start, end))
-    return merged
-
-
-def designable_segments(length: int, non_designable_merged: List[Tuple[int, int]], min_segment_len: int) -> List[Tuple[int, int]]:
-    """Complement of the merged non-designable intervals within [0, length),
-    dropping any gap shorter than min_segment_len.
-
-    Why segments instead of SEQUENCE_EXCLUDED_REGION: Primer3 caps how many
-    excluded intervals it will accept for one template (empirically, real
-    7PET markers up to 40kb with ~50% masked coverage blow straight past
-    that cap even after merging -- primer3_core rejects them outright with
-    "Too many elements for tag SEQUENCE_EXCLUDED_REGION"). Handing primer3 a
-    handful of already-clean sub-templates instead sidesteps the cap
-    entirely, and is arguably more correct anyway: a 40kb template with half
-    of it excluded isn't a meaningful "design somewhere in here" request,
-    it's a list of the few places that actually qualify.
-    """
-    segments = []
-    cursor = 0
-    for start, end in non_designable_merged:
-        if start > cursor:
-            segments.append((cursor, start))
-        cursor = max(cursor, end)
-    if cursor < length:
-        segments.append((cursor, length))
-    return [(s, e) for s, e in segments if e - s >= min_segment_len]
-
-
-def header_field(header: str, key: str) -> str:
-    """Pull 'key=value' out of a post_processing_unitigs.py FASTA header
-    (space-separated 'key=value' tokens after the id)."""
-    for token in header.split()[1:]:
-        if token.startswith(f"{key}="):
-            return token[len(key) + 1 :]
-    raise ValueError(f"'{key}=' not found in header: {header!r}")
-
-
-SEGMENT_ID_SEP = "::"  # marker_id::start-end -- reversed by split_segment_id()
-
-
-def split_segment_id(sequence_id: str) -> Tuple[str, int]:
-    """'2465::15200-18400' -> ('2465', 15200) -- marker id + segment offset,
-    so primer3's segment-relative positions can be reported back in the
-    original marker's own coordinates."""
-    marker_id, _, coords = sequence_id.rpartition(SEGMENT_ID_SEP)
-    offset = int(coords.split("-")[0])
-    return marker_id, offset
-
-
 def build_boulder_input(
     fasta_path: Path,
-    min_segment_len: int,
     product_size_range: str,
     num_return: int,
     opt_size: int,
@@ -163,42 +78,43 @@ def build_boulder_input(
     min_gc: float,
     max_gc: float,
 ) -> Tuple[str, int, int]:
-    """Returns (boulder_text, n_markers, n_segments)."""
+    """Returns (boulder_text, n_markers, n_markers_with_masking)."""
     records = []
     n_markers = 0
-    n_segments = 0
+    n_masked = 0
     for rec in parse_fasta(fasta_path):
         n_markers += 1
-        non_designable = merge_intervals(parse_non_designable(header_field(rec.description, "non_designable")))
-        for seg_start, seg_end in designable_segments(len(rec.seq), non_designable, min_segment_len):
-            n_segments += 1
-            segment_seq = rec.seq[seg_start:seg_end].upper()
-            block = [
-                f"SEQUENCE_ID={rec.id}{SEGMENT_ID_SEP}{seg_start}-{seg_end}",
-                f"SEQUENCE_TEMPLATE={segment_seq}",
-                "PRIMER_TASK=generic",
-                "PRIMER_PICK_LEFT_PRIMER=1",
-                "PRIMER_PICK_RIGHT_PRIMER=1",
-                "PRIMER_PICK_INTERNAL_OLIGO=0",
-                f"PRIMER_NUM_RETURN={num_return}",
-                f"PRIMER_PRODUCT_SIZE_RANGE={product_size_range}",
-                f"PRIMER_OPT_SIZE={opt_size}",
-                f"PRIMER_MIN_SIZE={min_size}",
-                f"PRIMER_MAX_SIZE={max_size}",
-                f"PRIMER_OPT_TM={opt_tm}",
-                f"PRIMER_MIN_TM={min_tm}",
-                f"PRIMER_MAX_TM={max_tm}",
-                f"PRIMER_MIN_GC={min_gc}",
-                f"PRIMER_MAX_GC={max_gc}",
-                "=",
-            ]
-            records.append("\n".join(block))
+        if any(c.islower() for c in rec.seq):
+            n_masked += 1
+        block = [
+            f"SEQUENCE_ID={rec.id}",
+            f"SEQUENCE_TEMPLATE={rec.seq}",
+            "PRIMER_TASK=generic",
+            "PRIMER_PICK_LEFT_PRIMER=1",
+            "PRIMER_PICK_RIGHT_PRIMER=1",
+            "PRIMER_PICK_INTERNAL_OLIGO=0",
+            # soft-masked (lowercase) bases: primer3 keeps a primer's 3' end off
+            # them but allows the rest of the primer, and a pair, to span them.
+            "PRIMER_LOWERCASE_MASKING=1",
+            f"PRIMER_NUM_RETURN={num_return}",
+            f"PRIMER_PRODUCT_SIZE_RANGE={product_size_range}",
+            f"PRIMER_OPT_SIZE={opt_size}",
+            f"PRIMER_MIN_SIZE={min_size}",
+            f"PRIMER_MAX_SIZE={max_size}",
+            f"PRIMER_OPT_TM={opt_tm}",
+            f"PRIMER_MIN_TM={min_tm}",
+            f"PRIMER_MAX_TM={max_tm}",
+            f"PRIMER_MIN_GC={min_gc}",
+            f"PRIMER_MAX_GC={max_gc}",
+            "=",
+        ]
+        records.append("\n".join(block))
 
-    return "\n".join(records) + "\n", n_markers, n_segments
+    return "\n".join(records) + "\n", n_markers, n_masked
 
 
 ##############################################################################
-### Boulder-IO output -> TSV
+# Boulder-IO output -> TSV
 
 
 def parse_boulder_records(text: str) -> Iterator[Dict[str, str]]:
@@ -219,15 +135,10 @@ def parse_boulder_records(text: str) -> Iterator[Dict[str, str]]:
 
 
 def pairs_from_record(record: Dict[str, str]) -> List[Dict[str, str]]:
-    """One row per PRIMER_PAIR_<i>_* pair primer3 actually returned.
-
-    Positions come back relative to the segment primer3 actually saw --
-    translated back to the original marker's own coordinates here (+ segment
-    offset) so a row is directly usable against the marker FASTA, not a
-    sub-template the caller never sees.
-    """
-    sequence_id = record.get("SEQUENCE_ID", "")
-    marker_id, seg_offset = split_segment_id(sequence_id)
+    """One row per PRIMER_PAIR_<i>_* pair primer3 actually returned. Positions are
+    0-based and marker-relative (PRIMER_FIRST_BASE_INDEX defaults to 0), so a row
+    is directly usable against the marker FASTA."""
+    marker_id = record.get("SEQUENCE_ID", "")
     n_returned = int(record.get("PRIMER_PAIR_NUM_RETURNED", "0") or "0")
     rows = []
     for i in range(n_returned):
@@ -236,15 +147,14 @@ def pairs_from_record(record: Dict[str, str]) -> List[Dict[str, str]]:
         rows.append(
             {
                 "marker_id": marker_id,
-                "segment": sequence_id.split(SEGMENT_ID_SEP)[-1],
                 "pair_rank": str(i),
                 "left_seq": record[f"PRIMER_LEFT_{i}_SEQUENCE"],
                 "left_tm": record[f"PRIMER_LEFT_{i}_TM"],
-                "left_pos": str(int(left_pos) + seg_offset),
+                "left_pos": left_pos,
                 "left_len": left_len,
                 "right_seq": record[f"PRIMER_RIGHT_{i}_SEQUENCE"],
                 "right_tm": record[f"PRIMER_RIGHT_{i}_TM"],
-                "right_pos": str(int(right_pos) + seg_offset),
+                "right_pos": right_pos,
                 "right_len": right_len,
                 "product_size": record[f"PRIMER_PAIR_{i}_PRODUCT_SIZE"],
                 "pair_penalty": record.get(f"PRIMER_PAIR_{i}_PENALTY", ""),
@@ -255,7 +165,6 @@ def pairs_from_record(record: Dict[str, str]) -> List[Dict[str, str]]:
 
 TSV_COLUMNS = [
     "marker_id",
-    "segment",
     "pair_rank",
     "left_seq",
     "left_tm",
@@ -279,17 +188,15 @@ def write_tsv(rows: List[Dict[str, str]], path: Path):
 
 def write_no_primers(records: List[Dict[str, str]], path: Path):
     with open(path, "w") as fh:
-        fh.write("marker_id\tsegment\treason\n")
+        fh.write("marker_id\treason\n")
         for record in records:
-            sequence_id = record.get("SEQUENCE_ID", "")
-            marker_id, _ = split_segment_id(sequence_id) if SEGMENT_ID_SEP in sequence_id else (sequence_id, 0)
-            segment = sequence_id.split(SEGMENT_ID_SEP)[-1] if SEGMENT_ID_SEP in sequence_id else ""
+            marker_id = record.get("SEQUENCE_ID", "")
             reason = record.get("PRIMER_PAIR_EXPLAIN", record.get("PRIMER_ERROR", "no pairs returned"))
-            fh.write(f"{marker_id}\t{segment}\t{reason}\n")
+            fh.write(f"{marker_id}\t{reason}\n")
 
 
 ##############################################################################
-### CLI
+# CLI
 
 
 def parse_args():
@@ -301,12 +208,6 @@ def parse_args():
     p.add_argument("--label", required=True, help="Prefix for output filenames, e.g. lineage/species id")
     p.add_argument("--out-dir", required=True, type=Path)
     p.add_argument("--primer3-bin", default="primer3_core", help="primer3_core executable (default: on PATH)")
-    p.add_argument(
-        "--min-segment-length",
-        type=int,
-        default=100,
-        help="Shortest contiguous non-masked stretch worth submitting to primer3 (default: 100bp)",
-    )
     p.add_argument("--product-size-range", default="70-200", help="PRIMER_PRODUCT_SIZE_RANGE (default: 70-200)")
     p.add_argument("--num-return", type=int, default=3, help="PRIMER_NUM_RETURN, pairs per marker (default: 3)")
     p.add_argument("--opt-size", type=int, default=20)
@@ -324,9 +225,8 @@ def main():
     args = parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    boulder_input, n_markers, n_segments = build_boulder_input(
+    boulder_input, n_markers, n_masked = build_boulder_input(
         args.fasta,
-        min_segment_len=args.min_segment_length,
         product_size_range=args.product_size_range,
         num_return=args.num_return,
         opt_size=args.opt_size,
@@ -340,15 +240,10 @@ def main():
     )
     if n_markers == 0:
         sys.exit(f"No records found in {args.fasta} -- nothing to design primers for.")
-    if n_segments == 0:
-        sys.exit(
-            f"{n_markers:,} marker(s) read, but none had a contiguous non-masked stretch "
-            f">= {args.min_segment_length}bp -- nothing to submit to primer3."
-        )
 
     print(
-        f"Running primer3_core on {n_segments:,} clean segment(s) from {n_markers:,} marker(s) "
-        f"in {args.fasta} ...",
+        f"Running primer3_core on {n_markers:,} marker(s) "
+        f"({n_masked:,} with soft-masked regions) in {args.fasta} ...",
         file=sys.stderr,
     )
     result = subprocess.run(
@@ -360,7 +255,7 @@ def main():
     if result.returncode != 0:
         sys.exit(
             f"primer3_core exited {result.returncode} -- treating as a fatal batch failure "
-            f"(a single unparseable segment breaks the whole Boulder-IO batch):\n{result.stderr}"
+            f"(a single unparseable record breaks the whole Boulder-IO batch):\n{result.stderr}"
         )
 
     all_rows: List[Dict[str, str]] = []
@@ -381,11 +276,10 @@ def main():
 
     n_with_primers = len(markers_with_primers)
     print("\nResults:", file=sys.stderr)
-    print(f"  Markers submitted          : {n_markers:,}", file=sys.stderr)
-    print(f"  Clean segments submitted   : {n_segments:,}", file=sys.stderr)
-    print(f"  Markers with >=1 pair      : {n_with_primers:,} ({100 * n_with_primers / n_markers:.1f}%)", file=sys.stderr)
-    print(f"  Markers with 0 pairs       : {n_markers - n_with_primers:,}", file=sys.stderr)
-    print(f"  Total primer pairs found   : {len(all_rows):,}", file=sys.stderr)
+    print(f"  Markers submitted     : {n_markers:,}", file=sys.stderr)
+    print(f"  Markers with >=1 pair : {n_with_primers:,} ({100 * n_with_primers / n_markers:.1f}%)", file=sys.stderr)
+    print(f"  Markers with 0 pairs  : {n_markers - n_with_primers:,}", file=sys.stderr)
+    print(f"  Total primer pairs    : {len(all_rows):,}", file=sys.stderr)
     print(f"  Wrote {primers_path}", file=sys.stderr)
     print(f"  Wrote {no_primers_path}", file=sys.stderr)
 
