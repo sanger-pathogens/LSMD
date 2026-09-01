@@ -117,31 +117,32 @@ def main():
 
     fig_fmt = dict(figsize=(9, 4.6), dpi=200)
 
-    # --- Figure 1: log-count histogram, full range -----------------------------
+    # --- Figure 1: linear-count histogram + zoomed inset on the marker tail ----
     # Almost all species-wide unitigs sit in a narrow spike around score=0 --
     # present within the lineage but just as common outside it, so they carry
-    # no discriminating power. The unitigs that actually make good diagnostic
-    # markers are a thin tail out near score=1. A
-    # linear-count histogram renders that tail as invisible; log-count keeps
-    # the near-zero spike AND resolves the tail in the same panel, without
-    # touching the x-axis (score is bounded, not heavy-tailed itself -- only
-    # the counts are).
+    # no discriminating power. The unitigs that make good diagnostic markers are
+    # a thin tail out near score=1. A log y-axis resolves that tail but badly
+    # distorts how overwhelming the near-zero spike is (a reader eyeballs bar
+    # heights linearly). Instead: honest linear-count main panel -- the spike
+    # reads at true scale -- plus an inset zoomed to score >= good-threshold with
+    # its own y-scale, so the handful of real candidates are still visible and
+    # countable.
     fig, ax = plt.subplots(**fig_fmt)
     bins = np.linspace(score.min(), score.max(), 80)
     ax.hist(score, bins=bins, color=SERIES_BLUE, edgecolor=SURFACE, linewidth=0.4, zorder=2)
-    ax.set_yscale("log")
     ax.axvline(threshold, color=THRESHOLD_COLOR, linewidth=1.5, linestyle=(0, (4, 2)), zorder=3)
     ax.text(
-        threshold,
+        threshold - 0.015,
         ax.get_ylim()[1],
-        f" score ≥ {threshold:g} = high-specificity candidate",
+        f"score ≥ {threshold:g} = high-specificity ",
         color=THRESHOLD_COLOR,
-        fontsize=9,
+        fontsize=8.5,
         va="top",
-        ha="left",
+        ha="right",
+        rotation=90,
     )
     ax.set_xlabel("Specificity score (within_pct − outside_pct)")
-    ax.set_ylabel("Count (log scale)")
+    ax.set_ylabel("Count")
     ax.set_title(
         f"{args.display_name} — species-wide unitig specificity, {args.mode} mode (n={n:,})",
         color=TEXT_PRIMARY,
@@ -160,6 +161,24 @@ def main():
         style="italic",
     )
     style_axes(ax)
+
+    # Inset: the high-specificity tail only. Skipped if nothing clears the
+    # threshold (an empty Axes reads as a bug, not as "zero markers").
+    if n_good > 0:
+        axin = ax.inset_axes([0.10, 0.42, 0.40, 0.46])
+        tail = score[score >= threshold]
+        axin.hist(
+            tail,
+            bins=np.linspace(threshold, score.max(), 20),
+            color=THRESHOLD_COLOR,
+            edgecolor=SURFACE,
+            linewidth=0.4,
+        )
+        axin.set_title(f"score ≥ {threshold:g}  (n={n_good:,})", fontsize=8, color=TEXT_SECONDARY)
+        axin.tick_params(labelsize=7, colors=TEXT_SECONDARY)
+        for spine in ("top", "right"):
+            axin.spines[spine].set_visible(False)
+
     fig.tight_layout()
     fig.savefig(args.out_dir / f"{args.label}_specificity_score_hist.png", facecolor=SURFACE)
     plt.close(fig)
