@@ -23,11 +23,12 @@ The pipeline builds a chain of SBWT/Themisto2 indexes and then subtracts them fr
 | `lin_cand`        | `candidate_index − xlin_bg` -- candidates confirmed specific _within_ the species.                        |
 | `markers`         | `lin_cand − bg_excl` -- final marker set, also confirmed specific against the outside background.         |
 
-Concretely, the pipeline runs as three stages:
+Concretely, the pipeline runs as these stages (stages 3-4 are opt-in):
 
 1. **`BUILD_COLOR_INDEX`** ([assorted-sub-workflows/themisto2](assorted-sub-workflows/themisto2)) -- maps metadata + assemblies to a Themisto2 colour file, builds `species_index` and (if `--target_groups` is set) `lineage_index`, then filters and rebuilds `lineage_index` down to `candidate_index`.
 2. **`SET_DIFF_CALCULATIONS`** ([assorted-sub-workflows/themisto2](assorted-sub-workflows/themisto2)) -- computes `bg_excl`, `xlin_bg`, `lin_cand` and `markers` by chaining `sbwt difference` (each diff is immediately re-verified with `sbwt check`, since a corrupted diff has been observed to exit `0`).
-3. **`POST_PROCESS_MARKERS`** ([modules/post_processing_markers.nf](modules/post_processing_markers.nf), opt-in via `--primer_post_processing`) -- dumps `markers`' unitigs to FASTA and filters/masks them for PCR/primer-design suitability (length + global/local GC%).
+3. **`POST_PROCESS_MARKERS`** ([modules/post_processing_markers.nf](modules/post_processing_markers.nf), opt-in via `--primer_post_processing`) -- dumps `markers`' unitigs to FASTA, rejects on length + global GC%, and soft-masks (lowercases) out-of-range local windows so primer3 can avoid them without losing the rest of the fragment.
+4. **`DESIGN_PRIMERS`** ([modules/primer3.nf](modules/primer3.nf), opt-in via `--primer3_design`, needs `--primer_post_processing` too) -- runs `primer3_core` on each soft-masked marker with `PRIMER_LOWERCASE_MASKING=1`.
 
 > This mirrors the numbered `00`-`09` stage documentation kept alongside the pipeline's working data (outside this repo) -- see that doc set for the full biological rationale and worked examples behind each stage.
 
@@ -50,7 +51,7 @@ This pipeline is still early in development (see open TODOs in [main.nf](main.nf
 
 - **Single run per invocation.** `--metadata`/`--assembly_input` only support one species/lineage-set per run; multi-species support (a samplesheet of `species_id, metadata, assembly, target_groups` rows) is planned but not yet implemented.
 - **`--target_groups` is a single global list**, not per-species -- fine for one species per run, but will need to move onto that future samplesheet.
-- **Step 09/10 tooling is partial.** [modules/post_processing_markers.nf](modules/post_processing_markers.nf) is wired in behind `--primer_post_processing`; [modules/primer3.nf](modules/primer3.nf) and [modules/bait_capture.nf](modules/bait_capture.nf) are still unfilled module templates for a later primer-design/bait-capture step, not yet called from `main.nf`.
+- **Step 10 is partial.** [modules/post_processing_markers.nf](modules/post_processing_markers.nf) (`--primer_post_processing`) and [modules/primer3.nf](modules/primer3.nf) (`--primer3_design`) are wired into `main.nf`; [modules/bait_capture.nf](modules/bait_capture.nf) is still an unfilled template.
 - **GTDB-based background exclusion isn't implemented** -- only the ATB-based `bg_excl`/`markers` path currently runs.
 - A couple of diagnostic scripts (`bin/plot_specificity.py`, `bin/validation_classify_gpsc.py`) exist but aren't yet wired into a module/subworkflow.
 
@@ -188,9 +189,11 @@ results/
 | ------------------------------------------- | -------------------------------------------------------- |
 | `markers_<species>_<lineage>.sbwt`          | Always -- checked `markers` SBWT index                   |
 | `markers_<species>_<lineage>_unitigs.fasta` | Always -- `markers` dumped to FASTA                      |
-| `<lineage>_filtered_markers.fasta`          | `--primer_post_processing`                               |
+| `<lineage>_filtered_markers.fasta`          | `--primer_post_processing` (soft-masked)                 |
 | `<lineage>_rejected_markers.fasta`          | `--primer_post_processing` and `--primer_write_rejected` |
 | `<lineage>_marker_analysis.png`             | `--primer_post_processing` and `--primer_plot`           |
+| `primers/<meta.ID>_primers.tsv`             | `--primer3_design`                                       |
+| `primers/<meta.ID>_no_primers.tsv`          | `--primer3_design`                                       |
 
 #### `stats.json` fields
 

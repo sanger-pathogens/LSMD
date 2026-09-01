@@ -10,7 +10,7 @@
     "Step09 - Candidate marker post-processing (post_processing_markers.nf)": {
       "primer_post_processing": {
         "default": "false",
-        "help_text": "Filter/mask G (final candidate markers) for PCR/primer-design suitability. Off by default -- the pipeline stops at the checked candidate_markers SBWT index/FASTA unless this is turned on."
+        "help_text": "Filter and soft-mask G (final candidate markers) for PCR/primer-design suitability. Off by default -- the pipeline stops at the checked candidate_markers SBWT index/FASTA unless this is turned on."
       },
       "primer_min_length": {
         "default": "100",
@@ -26,7 +26,7 @@
       },
       "primer_window_size": {
         "default": "same as --kmer_size",
-        "help_text": "Local sliding-window size (bp) for the non-designable-region GC check. Windows outside primer_gc_min-primer_gc_max are soft-masked (lowercased) in the output FASTA, not rejected -- the rest of the candidate stays usable. Defaults to kmer_size (k-mer resolution)."
+        "help_text": "Local sliding-window size (bp) for the non-designable-region GC check. Windows outside primer_gc_min-primer_gc_max are soft-masked (lowercased) in the output FASTA, not rejected -- primer3 runs with PRIMER_LOWERCASE_MASKING=1 so a primer's 3' end can't sit on a masked base but the rest of the candidate stays usable. Defaults to kmer_size (k-mer resolution)."
       },
       "primer_write_rejected": {
         "default": "true",

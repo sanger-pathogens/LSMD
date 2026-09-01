@@ -23,7 +23,6 @@ process DESIGN_PRIMERS {
         ${filtered_fasta} \\
         --label ${meta.ID} \\
         --out-dir . \\
-        --min-segment-length ${params.primer3_min_segment_length} \\
         --product-size-range ${params.primer3_product_size_range} \\
         --num-return ${params.primer3_num_return} \\
         --opt-size ${params.primer3_opt_size} \\
