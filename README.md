@@ -199,15 +199,15 @@ results/
 
 Every `index_species/` and `index_target_group/<group>/` directory (under `colour_mapping/<ID>/`) gets its own `stats.json`. Some fields only make sense at species-wide scope -- a sample with no label, or an assembly with no metadata row at all, can't be attributed to one specific group, so those fields are simply omitted (not reported as `0`) from per-group `stats.json` files.
 
-| field                                   | species-wide | per-group | meaning                                                                                                                                |
-| --------------------------------------- | ------------ | --------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `index_type`                            | always       | always    | `"species"` or `"target_group"`                                                                                                        |
-| `target_group`                          | always       | always    | `"species_wide"`, or the group's label                                                                                                  |
-| `metadata_column`                       | always       | always    | the `--group_label` value used                                                                                                          |
-| `samples_dropped_missing_label`         | always       | omitted   | samples with no value in `--group_label` at all                                                                                         |
-| `samples_dropped_missing_assembly`      | always       | always    | samples with a label but no matching assembly on disk -- this one genuinely varies by group, so per-group indexes get their own count   |
-| `assemblies_excluded_missing_metadata`  | always       | omitted   | assembly files on disk with no matching metadata row                                                                                    |
-| `total_assemblies_written`              | always       | always    | assemblies actually written to this index's `file_colors_input.txt`                                                                     |
+| field                                  | species-wide | per-group | meaning                                                                                                                               |
+| -------------------------------------- | ------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `index_type`                           | always       | always    | `"species"` or `"target_group"`                                                                                                       |
+| `target_group`                         | always       | always    | `"species_wide"`, or the group's label                                                                                                |
+| `metadata_column`                      | always       | always    | the `--group_label` value used                                                                                                        |
+| `samples_dropped_missing_label`        | always       | omitted   | samples with no value in `--group_label` at all                                                                                       |
+| `samples_dropped_missing_assembly`     | always       | always    | samples with a label but no matching assembly on disk -- this one genuinely varies by group, so per-group indexes get their own count |
+| `assemblies_excluded_missing_metadata` | always       | omitted   | assembly files on disk with no matching metadata row                                                                                  |
+| `total_assemblies_written`             | always       | always    | assemblies actually written to this index's `file_colors_input.txt`                                                                   |
 
 For the Nextflow channel-level contract (`metadata_ch`/`assembly_ch` in, `sbwt_index`/`lineage_index`/`candidate_index` out) that `BUILD_COLOR_INDEX` exposes for wiring into a parent pipeline, see the [themisto2 sub-workflow README](assorted-sub-workflows/themisto2/README.md).
 
@@ -242,7 +242,7 @@ Run `nextflow run main.nf --help` for the full, always-up-to-date list (rendered
 
 | Option                         | Type      | Default | Description                                                                                                                           |
 | ------------------------------ | --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `--color_index_kmer_size`                | `integer` | `31`    | k-mer size used consistently across GGCAT, SBWT and Themisto2. Must match the background index.                                       |
+| `--color_index_kmer_size`      | `integer` | `31`    | k-mer size used consistently across GGCAT, SBWT and Themisto2. Must match the background index.                                       |
 | `--gzip_export`                | `boolean` | `false` | Gzip the Themisto2 export's `color_sets.txt`.                                                                                         |
 | `--temp_dir`                   | `path`    | `""`    | Scratch root for GGCAT/SBWT temp/working dirs. Falls back to a task-local work dir; only set for full background-DB-scale runs.       |
 | `--candidate_min_freq`         | `string`  | `core`  | Presence-fraction preset (`core` ≥0.95, `relaxed` ≥0.5, `catchall` ≥1 genome) or a literal fraction, for `candidate_index` filtering. |
@@ -261,15 +261,15 @@ Run `nextflow run main.nf --help` for the full, always-up-to-date list (rendered
 
 **Step09 -- candidate marker post-processing** (`--primer_post_processing`)
 
-| Option                     | Type      | Default       | Description                                                                                                                                |
-| -------------------------- | --------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--primer_post_processing` | `boolean` | `false`       | Filter/mask `markers` for PCR/primer-design suitability. Off by default -- the pipeline stops at the `markers` SBWT index/FASTA otherwise. |
-| `--primer_min_length`      | `integer` | `100`         | Minimum candidate marker length in bp.                                                                                                     |
-| `--primer_gc_min`          | `float`   | `35.0`        | Minimum global GC% a candidate's whole sequence must fall within.                                                                          |
-| `--primer_gc_max`          | `float`   | `60.0`        | Maximum global GC% a candidate's whole sequence must fall within.                                                                          |
+| Option                     | Type      | Default                   | Description                                                                                                                                |
+| -------------------------- | --------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--primer_post_processing` | `boolean` | `false`                   | Filter/mask `markers` for PCR/primer-design suitability. Off by default -- the pipeline stops at the `markers` SBWT index/FASTA otherwise. |
+| `--primer_min_length`      | `integer` | `100`                     | Minimum candidate marker length in bp.                                                                                                     |
+| `--primer_gc_min`          | `float`   | `35.0`                    | Minimum global GC% a candidate's whole sequence must fall within.                                                                          |
+| `--primer_gc_max`          | `float`   | `60.0`                    | Maximum global GC% a candidate's whole sequence must fall within.                                                                          |
 | `--primer_window_size`     | `integer` | `--color_index_kmer_size` | Local sliding-window size (bp) for the GC check. Out-of-range windows are soft-masked (lowercased), not rejected.                          |
-| `--primer_write_rejected`  | `boolean` | `true`        | Write rejected (too-short / out-of-range) candidates to their own FASTA.                                                                   |
-| `--primer_plot`            | `boolean` | `true`        | Generate the length/GC diagnostic plot.                                                                                                    |
+| `--primer_write_rejected`  | `boolean` | `true`                    | Write rejected (too-short / out-of-range) candidates to their own FASTA.                                                                   |
+| `--primer_plot`            | `boolean` | `true`                    | Generate the length/GC diagnostic plot.                                                                                                    |
 
 ### Dependencies
 
