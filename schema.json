@@ -26,31 +26,31 @@
       }
     },
     "Candidate marker post-processing (post_processing_markers.nf)": {
-      "primer_post_processing": {
+      "marker_post_processing": {
         "default": "false",
-        "help_text": "Filter and soft-mask G (final candidate markers) for PCR/primer-design suitability. Off by default -- the pipeline stops at the checked markers SBWT index/FASTA (markers_<species>_<group>/) unless this is turned on."
+        "help_text": "Filter and soft-mask G (final candidate markers) for downstream assay design -- primer3 PCR primers and/or bait-capture tiling. Off by default -- the pipeline stops at the checked markers SBWT index/FASTA (markers_<species>_<group>/) unless this is turned on."
       },
-      "primer_min_length": {
+      "marker_min_length": {
         "default": "100",
         "help_text": "Minimum candidate marker length in bp."
       },
-      "primer_gc_min": {
+      "marker_gc_min": {
         "default": "35.0",
         "help_text": "Minimum global GC%% a candidate marker's whole sequence must fall within."
       },
-      "primer_gc_max": {
+      "marker_gc_max": {
         "default": "60.0",
         "help_text": "Maximum global GC%% a candidate marker's whole sequence must fall within."
       },
-      "primer_window_size": {
+      "marker_window_size": {
         "default": "same as --color_index_kmer_size",
-        "help_text": "Local sliding-window size (bp) for the non-designable-region GC check. Windows outside primer_gc_min-primer_gc_max are soft-masked (lowercased) in the output FASTA, not rejected -- primer3 runs with PRIMER_LOWERCASE_MASKING=1 so a primer's 3' end can't sit on a masked base but the rest of the candidate stays usable. Defaults to color_index_kmer_size (k-mer resolution)."
+        "help_text": "Local sliding-window size (bp) for the non-designable-region GC check. Windows outside marker_gc_min-marker_gc_max are soft-masked (lowercased) in the output FASTA, not rejected -- primer3 runs with PRIMER_LOWERCASE_MASKING=1 so a primer's 3' end can't sit on a masked base but the rest of the candidate stays usable. Defaults to color_index_kmer_size (k-mer resolution)."
       },
-      "primer_write_rejected": {
+      "marker_write_rejected": {
         "default": "true",
         "help_text": "Write rejected (too-short / global-GC-out-of-range) candidates to their own FASTA."
       },
-      "primer_plot": {
+      "marker_plot": {
         "default": "true",
         "help_text": "Generate the 4-panel length/GC diagnostic plot."
       }

@@ -97,9 +97,9 @@ bsub.py --threads 32 64 lsmd_run \
 
 The `--threads 32 64` request (32 CPUs, 64 GB RAM) matches the pipeline's resource requirements.
 
-### Optional: Primer design and filtering
+### Optional: Marker post-processing and primer design
 
-By default, the pipeline stops at the markers SBWT index and FASTA. To filter markers by length/GC% and design primers with primer3:
+By default, the pipeline stops at the markers SBWT index and FASTA. `--marker_post_processing` filters markers by length/GC% and soft-masks them for downstream assay design (primer3 PCR primers and/or bait-capture tiling); `--primer3_design` then designs primers with primer3:
 
 ```bash
 nextflow run main.nf \
@@ -108,11 +108,11 @@ nextflow run main.nf \
   --group_label Lineage \
   --sample_col Sample_ID \
   --outdir my_output \
-  --primer_post_processing \
+  --marker_post_processing \
   --primer3_design \
-  --primer_min_length 100 \
-  --primer_gc_min 35.0 \
-  --primer_gc_max 60.0
+  --marker_min_length 100 \
+  --marker_gc_min 35.0 \
+  --marker_gc_max 60.0
 ```
 
 Filtered/soft-masked markers go to `my_output/post_processed_markers/`; designed primers to `my_output/markers_<species>_<group>/primers/` (one `_primers.tsv` per group, plus `_no_primers.tsv` listing markers primer3 could not design against).
@@ -207,7 +207,7 @@ results/
 │   ├── markers_<species>_<group>.sbwt          # Final markers index
 │   ├── markers_<species>_<group>_unitigs.fasta # Markers as FASTA
 │   └── primers/                                # With --primer3_design: primer outputs
-├── post_processed_markers/                     # With --primer_post_processing
+├── post_processed_markers/                     # With --marker_post_processing
 │   ├── <species>_<group>_markers.fasta         # Soft-masked (length/GC filtered)
 │   ├── <species>_<group>_rejected_markers.fasta        # Rejected candidates
 │   └── <species>_<group>_marker_analysis.png           # Length/GC diagnostic plot
@@ -221,11 +221,11 @@ Paths are relative to `--outdir`.
 | File | Description |
 |------|-------------|
 | `color_mapping/<species>_stats.json` | Reconciliation summary: genomes written, dropped, labelled unclassified |
-| `candidate_marker_filtering/<species>_<group>_candidate_unitigs.fasta` | Candidate k-mers before background subtraction (step 07 output) |
+| `candidate_marker_filtering/<species>_<group>_candidate_unitigs.fasta` | Candidate k-mers before background subtraction (group-specificity filter output) |
 | `candidate_marker_filtering/<species>_<group>_specificity.tsv` | Per-unitig within-group / max-outside-group presence (diagnostic) |
 | `markers_<species>_<group>/markers_<species>_<group>_unitigs.fasta` | **Final markers** (after background subtraction), as FASTA |
 | `markers_<species>_<group>/markers_<species>_<group>.sbwt` | Same final markers, as an SBWT index |
-| `post_processed_markers/<species>_<group>_markers.fasta` | `--primer_post_processing`: markers filtered by length/GC and soft-masked (a subset of the final markers) |
+| `post_processed_markers/<species>_<group>_markers.fasta` | `--marker_post_processing`: markers filtered by length/GC and soft-masked (a subset of the final markers) |
 | `markers_<species>_<group>/primers/<species>_<group>_primers.tsv` | `--primer3_design`: designed primer pairs |
 
 ### stats.json fields
@@ -249,10 +249,10 @@ Paths are relative to `--outdir`.
 ### Pipeline stages
 
 1. **BUILD_COLOR_INDEX**: colour-map assemblies by group; build a species-wide SBWT/Themisto2 index from all genomes
-2. **Step 07 (group-specificity filtering)**: for each target group (from `target_groups`, or every group with ≥ `--candidate_min_genome_count` genomes when it's left blank), keep only k-mers that are group-core (present in ≥ `--candidate_min_freq` of the group) and group-specific (present in ≤ `--specificity_max_outside` of any single sibling group)
+2. **Group-specificity filtering**: for each target group (from `target_groups`, or every group with ≥ `--candidate_min_genome_count` genomes when it's left blank), keep only k-mers that are group-core (present in ≥ `--candidate_min_freq` of the group) and group-specific (present in ≤ `--specificity_max_outside` of any single sibling group)
 3. **Rebuild candidate index**: rebuild the filtered k-mers into a per-group SBWT/Themisto2 index
 4. **SET_DIFF_CALCULATIONS**: subtract the background (ATB) with `sbwt difference` → final markers
-5. **POST_PROCESS_MARKERS** (opt-in, `--primer_post_processing`): filter on length and global GC%; soft-mask (lowercase) local windows outside the GC range
+5. **POST_PROCESS_MARKERS** (opt-in, `--marker_post_processing`): filter on length and global GC%; soft-mask (lowercase) local windows outside the GC range
 6. **DESIGN_PRIMERS** (opt-in, `--primer3_design`): run primer3 on the soft-masked markers
 
 ### Key concepts
@@ -289,7 +289,7 @@ Run `nextflow run main.nf --help` for the full, always-up-to-date list.
 | `--temp_dir` | path | — | Scratch root for GGCAT/SBWT temp files (optional; falls back to task-local work dir) |
 | `--temp_space` | integer | 10000 | Temp storage (MB) requested for processes needing it |
 
-### Group-specificity filtering (step 07)
+### Group-specificity filtering
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
@@ -306,21 +306,21 @@ Off the Sanger farm there is no default background — supply `--bg_index` (an S
 | `--bg_index` | path | ATB (Sanger farm only) | Background SBWT index (must be built at same `--color_index_kmer_size`) |
 | `--bg_excl_index` | path | — | Pre-computed bg_excl index to reuse (skips the large background-subtraction diff) |
 
-### Marker post-processing (--primer_post_processing)
+### Marker post-processing (--marker_post_processing)
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `--primer_post_processing` | boolean | `false` | Filter/mask markers for PCR/primer-design suitability |
-| `--primer_min_length` | integer | 100 | Minimum marker length (bp) |
-| `--primer_gc_min` | float | 35.0 | Minimum global GC% |
-| `--primer_gc_max` | float | 60.0 | Maximum global GC% |
-| `--primer_window_size` | integer | `--color_index_kmer_size` | Sliding-window size (bp) for local GC check; out-of-range windows soft-masked (lowercased) |
-| `--primer_write_rejected` | boolean | `true` | Write rejected candidates to separate FASTA |
-| `--primer_plot` | boolean | `true` | Generate length/GC diagnostic plot |
+| `--marker_post_processing` | boolean | `false` | Filter/mask markers for downstream assay design (primer3 and/or bait capture) |
+| `--marker_min_length` | integer | 100 | Minimum marker length (bp) |
+| `--marker_gc_min` | float | 35.0 | Minimum global GC% |
+| `--marker_gc_max` | float | 60.0 | Maximum global GC% |
+| `--marker_window_size` | integer | `--color_index_kmer_size` | Sliding-window size (bp) for local GC check; out-of-range windows soft-masked (lowercased) |
+| `--marker_write_rejected` | boolean | `true` | Write rejected candidates to separate FASTA |
+| `--marker_plot` | boolean | `true` | Generate length/GC diagnostic plot |
 
 ### Primer design (--primer3_design)
 
-Requires `--primer_post_processing` to be enabled.
+Requires `--marker_post_processing` to be enabled.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
@@ -369,7 +369,7 @@ nextflow run main.nf --manifest ... --bg_index /path/to/custom.sbwt
 | GGCAT | 2.2.0 | `quay.io/biocontainers/ggcat:2.2.0--hf1b6044_0` | index building |
 | SBWT (sbwt-rs-cli) | 0.4.2 (patched, `-f93d92c`) | Sanger-internal `.sif` | index building, set-diff |
 | Themisto2 | 0.0.1 | `quay.io/sangerpathogens/themisto2:0.0.1` | index building |
-| pandas | 2.2.1 | `quay.io/sangerpathogens/pandas:2.2.1` | colour mapping, step 07 filter |
+| pandas | 2.2.1 | `quay.io/sangerpathogens/pandas:2.2.1` | colour mapping, group-specificity filter |
 | Biopython | 1.84 | `quay.io/biocontainers/biopython:1.84` | marker post-processing |
 | primer3 | 2.6.1 | `quay.io/biocontainers/primer3:2.6.1--pl5321h503566f_7` | primer design |
 

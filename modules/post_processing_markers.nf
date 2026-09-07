@@ -21,16 +21,16 @@ process POST_PROCESS_MARKERS {
     filtered_fasta = "${id}_markers.fasta"
     rejected_fasta = "${id}_rejected_markers.fasta"
     plot_png = "${id}_marker_analysis.png"
-    def reject_flag = params.primer_write_rejected ? "-r" : ""
-    def plot_flag = params.primer_plot ? "--plot" : ""
+    def reject_flag = params.marker_write_rejected ? "-r" : ""
+    def plot_flag = params.marker_plot ? "--plot" : ""
     """
     ${moduleDir}/../bin/post_processing_unitigs.py \\
         ${unitigs_fasta} \\
         -o . \\
-        -l ${params.primer_min_length} \\
-        -g ${params.primer_gc_min} \\
-        -G ${params.primer_gc_max} \\
-        -w ${params.primer_window_size} \\
+        -l ${params.marker_min_length} \\
+        -g ${params.marker_gc_min} \\
+        -G ${params.marker_gc_max} \\
+        -w ${params.marker_window_size} \\
         ${reject_flag} \\
         ${plot_flag}
 
