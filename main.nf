@@ -34,6 +34,7 @@ include { SBWT_DUMP_UNITIGS } from './assorted-sub-workflows/themisto2/modules/s
 include { POST_PROCESS_MARKERS } from './modules/post_processing_markers.nf'
 include { DESIGN_PRIMERS } from './modules/primer3.nf'
 include { CHECKPOINT_COUNT } from './assorted-sub-workflows/themisto2/modules/checkpoint_count.nf'
+include { MANIFEST_PARSE } from './subworkflows/manifest_parse.nf'
 
 
 /*
@@ -49,19 +50,30 @@ workflow {
         exit 0
     }
 
-    // Input channels from params. TODO: single metadata/assembly pair only --
-    // manifest/samplesheet channel for multi-run is PAT-3553 / PAT-3569.
-    metadata_ch = Channel.fromPath(params.metadata)
-    assembly_ch = Channel.fromPath(params.assembly_input)
+    // BUILD_COLOR_INDEX takes one pre-paired item per species:
+    //   [ [ID: species, target_groups: <csv>], metadata_file, assembly_input ]
+    // Either from a --manifest TSV (one row per species) or, for a single species,
+    // built from the --metadata / --assembly_input / --target_groups params.
+    if (params.manifest) {
+        MANIFEST_PARSE(params.manifest)
+        samples_ch = MANIFEST_PARSE.out.samples
+    } else {
+        // Single species: ID defaults to the metadata file's basename.
+        samples_ch = Channel.of([
+            [ID: file(params.metadata).baseName, target_groups: params.target_groups ?: ''],
+            file(params.metadata),
+            file(params.assembly_input),
+        ])
+    }
 
-    BUILD_COLOR_INDEX(metadata_ch, assembly_ch)
+    BUILD_COLOR_INDEX(samples_ch)
 
-    // step08 -- set-difference filtering (D/F/G). lineage_index/candidate_index
-    // (B/E) are only non-empty when --target_groups was set; bg_excl (C) is built
-    // inside SET_DIFF_CALCULATIONS from --bg_index / --bg_excl_index.
+    // step08 -- set-difference filtering. bg_excl (C) = background - species_index (A);
+    // markers (G) = candidate_index (E) - bg_excl. candidate_index (E) is only
+    // non-empty for species whose meta.target_groups is set; bg_excl is built inside
+    // SET_DIFF_CALCULATIONS from --bg_index / --bg_excl_index.
     SET_DIFF_CALCULATIONS(
         BUILD_COLOR_INDEX.out.sbwt_index,
-        BUILD_COLOR_INDEX.out.lineage_index,
         BUILD_COLOR_INDEX.out.candidate_index
     )
 

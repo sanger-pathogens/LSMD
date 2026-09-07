@@ -1,6 +1,24 @@
 {
   "pipeline": "Base schema",
   "params": {
+    "Input options": {
+      "manifest": {
+        "default": "null",
+        "help_text": "Run manifest: a TSV with a header row and one data row per species. Columns: species (used as the output folder name), metadata (path to a .tsv/.csv), assemblies (path to a directory or a .txt list), target_groups (optional, comma-separated lineage labels). When unset, use the single-species --metadata / --assembly_input / --target_groups params instead."
+      },
+      "metadata": {
+        "default": "null",
+        "help_text": "Single-species only (--manifest unset): metadata table (.tsv/.csv) for the species. Must contain the --sample_col and --group_label columns."
+      },
+      "assembly_input": {
+        "default": "null",
+        "help_text": "Single-species only (--manifest unset): a directory of assembly FASTAs, or a .txt file listing one assembly path per line. Which kind it is is detected automatically."
+      },
+      "target_groups": {
+        "default": "null",
+        "help_text": "Single-species only (--manifest unset): comma-separated lineage labels (e.g. GPSC1,GPSC2) to run lineage-specificity candidate filtering (step 07) for, alongside the species-wide index. Unset = species-wide only."
+      }
+    },
     "Logging options": {
       "monochrome_logs": {
         "default": "false",
