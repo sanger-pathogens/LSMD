@@ -5,7 +5,8 @@
 //   assemblies     path to a directory of assemblies OR a .txt file listing
 //                  one assembly path per line
 //   target_groups  optional, comma-separated lineage labels for that species
-//                  (e.g. "GPSC1,GPSC2"); empty = species-wide only
+//                  (e.g. "GPSC1,GPSC2"); empty = every lineage with
+//                  >= candidate_min_genome_count genomes (excluding "unclassified")
 //
 // Emits one tuple per row, the shape BUILD_COLOR_INDEX's samples_ch expects:
 //   [ [ID: <species>, target_groups: <string>], <metadata file>, <assemblies path> ]

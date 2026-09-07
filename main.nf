@@ -52,19 +52,13 @@ workflow {
 
     // BUILD_COLOR_INDEX takes one pre-paired item per species:
     //   [ [ID: species, target_groups: <csv>], metadata_file, assembly_input ]
-    // Either from a --manifest TSV (one row per species) or, for a single species,
-    // built from the --metadata / --assembly_input / --target_groups params.
-    if (params.manifest) {
-        MANIFEST_PARSE(params.manifest)
-        samples_ch = MANIFEST_PARSE.out.samples
-    } else {
-        // Single species: ID defaults to the metadata file's basename.
-        samples_ch = Channel.of([
-            [ID: file(params.metadata).baseName, target_groups: params.target_groups ?: ''],
-            file(params.metadata),
-            file(params.assembly_input),
-        ])
+    // built from the --manifest TSV (one row per species).
+    if (!params.manifest) {
+        exit 1, "ERROR: --manifest is required -- a TSV, one row per species, columns " +
+                "species / metadata / assemblies / target_groups. See assets/example_manifest.tsv."
     }
+    MANIFEST_PARSE(params.manifest)
+    samples_ch = MANIFEST_PARSE.out.samples
 
     BUILD_COLOR_INDEX(samples_ch)
 
@@ -110,14 +104,16 @@ workflow {
         }
     }
 
+    // Funnel TSV of this run's own numbers. Publish it only when intermediates
+    // are published -- same gate as CHECKPOINT_COUNT's `publishDir enabled:` --
+    // so a default run leaves no checkpoints/ dir. Without storeDir the file
+    // still collects, it just stays in the work dir.
+    def counts_args = [name: 'pipeline_counts.tsv', keepHeader: true, skip: 1, sort: true]
+    if( params.publish_intermediate )
+        counts_args.storeDir = "${params.outdir}/checkpoints"
+
     checkpoint_rows
     | map { meta, row -> row }
-    | collectFile(
-        name: 'pipeline_counts.tsv',
-        storeDir: "${params.outdir}/checkpoints",
-        keepHeader: true,
-        skip: 1,
-        sort: true,
-    )
+    | collectFile(counts_args)
     // baitcapture tool TODO create in location: /data/pam/team230/sm71/scratch/gps_project/lsmd/modules/
 }
