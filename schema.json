@@ -4,19 +4,13 @@
     "Input options": {
       "manifest": {
         "default": "null",
-        "help_text": "Run manifest: a TSV with a header row and one data row per species. Columns: species (used as the output folder name), metadata (path to a .tsv/.csv), assemblies (path to a directory or a .txt list), target_groups (optional, comma-separated lineage labels). When unset, use the single-species --metadata / --assembly_input / --target_groups params instead."
-      },
-      "metadata": {
-        "default": "null",
-        "help_text": "Single-species only (--manifest unset): metadata table (.tsv/.csv) for the species. Must contain the --sample_col and --group_label columns."
-      },
-      "assembly_input": {
-        "default": "null",
-        "help_text": "Single-species only (--manifest unset): a directory of assembly FASTAs, or a .txt file listing one assembly path per line. Which kind it is is detected automatically."
-      },
-      "target_groups": {
-        "default": "null",
-        "help_text": "Single-species only (--manifest unset): comma-separated lineage labels (e.g. GPSC1,GPSC2) to run lineage-specificity candidate filtering (step 07) for, alongside the species-wide index. Unset = species-wide only."
+        "help_text": "Run manifest (required): a TSV with a header row and one data row per species. Columns: species (used as the output-file prefix and folder name), metadata (path to a .tsv/.csv), assemblies (path to a directory of FASTAs or a .txt list of assembly paths -- detected automatically), target_groups (optional, comma-separated --group_label values to discover markers for; blank = every group with >= candidate_min_genome_count genomes, excluding 'unclassified'). See assets/example_manifest.tsv."
+      }
+    },
+    "Output options": {
+      "outdir": {
+        "default": "./results",
+        "help_text": "Directory where all results are published (one set per species in the manifest)."
       }
     },
     "Logging options": {
@@ -25,10 +19,16 @@
         "help_text": "Should logs appear in plain ASCII"
       }
     },
-    "Step09 - Candidate marker post-processing (post_processing_markers.nf)": {
+    "Resource options": {
+      "temp_space": {
+        "default": "10000",
+        "help_text": "Scratch/tmp storage (MB) requested from LSF via 'rusage[tmp=...]' for processes labelled request_temp (GGCAT, SBWT build, Themisto2 build). Raise for background-DB-scale runs."
+      }
+    },
+    "Candidate marker post-processing (post_processing_markers.nf)": {
       "primer_post_processing": {
         "default": "false",
-        "help_text": "Filter and soft-mask G (final candidate markers) for PCR/primer-design suitability. Off by default -- the pipeline stops at the checked candidate_markers SBWT index/FASTA unless this is turned on."
+        "help_text": "Filter and soft-mask G (final candidate markers) for PCR/primer-design suitability. Off by default -- the pipeline stops at the checked markers SBWT index/FASTA (markers_<species>_<group>/) unless this is turned on."
       },
       "primer_min_length": {
         "default": "100",
