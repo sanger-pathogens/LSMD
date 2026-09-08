@@ -62,10 +62,10 @@ workflow {
 
     BUILD_COLOR_INDEX(samples_ch)
 
-    // step08 -- set-difference filtering. bg_excl (C) = background - species_index (A);
-    // markers (G) = candidate_index (E) - bg_excl. candidate_index (E) is only
-    // non-empty for species whose meta.target_groups is set; bg_excl is built inside
-    // SET_DIFF_CALCULATIONS from --bg_index / --bg_excl_index.
+    // Set-difference filtering. bg_excl = background - species_index; markers =
+    // candidate_index - bg_excl. candidate_index is only non-empty for species whose
+    // meta.target_groups is set; bg_excl is built inside SET_DIFF_CALCULATIONS from
+    // --bg_index / --bg_excl_index.
     SET_DIFF_CALCULATIONS(
         BUILD_COLOR_INDEX.out.sbwt_index,
         BUILD_COLOR_INDEX.out.candidate_index
@@ -76,25 +76,26 @@ workflow {
     checkpoint_rows = BUILD_COLOR_INDEX.out.checkpoints
         .mix(SET_DIFF_CALCULATIONS.out.checkpoints)
 
-    // Candidate marker post-processing (step09) -- off by default (see
-    // --primer_post_processing's help_text). markers (G) is one .sbwt per
+    // Candidate marker post-processing -- off by default (see
+    // --marker_post_processing's help_text). markers is one .sbwt per
     // species/lineage combo produced by SET_DIFF_CALCULATIONS; dump each to
-    // FASTA, then filter/mask for PCR/primer-design suitability.
-    if (params.primer_post_processing) {
+    // FASTA, then filter/mask for downstream assay design (primer3 and/or baits).
+    if (params.marker_post_processing) {
         SBWT_DUMP_UNITIGS(SET_DIFF_CALCULATIONS.out.markers)
         POST_PROCESS_MARKERS(SBWT_DUMP_UNITIGS.out.unitigs)
 
-        // Checkpoint the post-processing funnel: G dumped to FASTA -> markers
-        // passing / rejected by the length + GC filter.
-        SBWT_DUMP_UNITIGS.out.unitigs.map    { meta, f -> [meta, 'G_markers_09_dumped_fasta', 'fasta', f] }
-        | mix( POST_PROCESS_MARKERS.out.filtered.map { meta, f -> [meta, 'H_markers_09_postproc_pass', 'fasta', f] } )
-        | mix( POST_PROCESS_MARKERS.out.rejected.map { meta, f -> [meta, 'H_markers_09_postproc_reject', 'fasta', f] } )
+        // Checkpoint the post-processing funnel: markers dumped to FASTA -> markers
+        // passing / rejected by the length + GC filter. `order` keys continue after
+        // the set-difference stages (which end at 80).
+        SBWT_DUMP_UNITIGS.out.unitigs.map    { meta, f -> [meta, 90, 'markers_dumped_fasta', 'fasta', f] }
+        | mix( POST_PROCESS_MARKERS.out.filtered.map { meta, f -> [meta, 100, 'markers_postproc_pass', 'fasta', f] } )
+        | mix( POST_PROCESS_MARKERS.out.rejected.map { meta, f -> [meta, 110, 'markers_postproc_reject', 'fasta', f] } )
         | set { postproc_checkpoint_inputs }
 
         CHECKPOINT_COUNT(postproc_checkpoint_inputs)
         checkpoint_rows = checkpoint_rows.mix(CHECKPOINT_COUNT.out.row)
 
-        // Primer3 design (step10) -- off by default, and only meaningful once
+        // Primer3 design -- off by default, and only meaningful once
         // POST_PROCESS_MARKERS has actually run (it needs the non_designable
         // coordinates from that step's FASTA headers). Runs on the passed/filtered
         // markers only -- rejected markers (too short/global-GC-out-of-range)
