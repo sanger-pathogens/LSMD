@@ -29,8 +29,7 @@ def printHelp() {
 // SUBWORKFLOWS
 //
 include { BUILD_COLOR_INDEX } from './assorted-sub-workflows/themisto2/subworkflows/build_color_index.nf'
-include { SET_DIFF_CALCULATIONS } from './assorted-sub-workflows/themisto2/subworkflows/setdiff_filter.nf'
-include { SBWT_DUMP_UNITIGS } from './assorted-sub-workflows/themisto2/modules/sbwt.nf'
+include { MARKER_FILTERING } from './assorted-sub-workflows/themisto2/subworkflows/marker_filtering.nf'
 include { POST_PROCESS_MARKERS } from './modules/post_processing_markers.nf'
 include { DESIGN_PRIMERS } from './modules/primer3.nf'
 include { CHECKPOINT_COUNT } from './assorted-sub-workflows/themisto2/modules/checkpoint_count.nf'
@@ -50,45 +49,45 @@ workflow {
         exit 0
     }
 
-    // BUILD_COLOR_INDEX takes one pre-paired item per species:
-    //   [ [ID: species, target_groups: <csv>], metadata_file, assembly_input ]
-    // built from the --manifest TSV (one row per species).
+    // BUILD_COLOR_INDEX takes, per species: samples [ [ID: species], metadata_file,
+    // assembly_input ], from the --manifest TSV (one row per species), and builds ONLY the
+    // species-wide colour index -- no filtering happens there any more (see
+    // build_color_index.nf's header comment).
     if (!params.manifest) {
         exit 1, "ERROR: --manifest is required -- a TSV, one row per species, columns " +
-                "species / metadata / assemblies / target_groups. See assets/example_manifest.tsv."
+                "species / metadata / assemblies / target_groups / atb_target_species. " +
+                "See assets/example_manifest.tsv."
     }
     MANIFEST_PARSE(params.manifest)
     samples_ch = MANIFEST_PARSE.out.samples
 
     BUILD_COLOR_INDEX(samples_ch)
 
-    // Set-difference filtering. bg_excl = background - species_index; markers =
-    // candidate_index - bg_excl. candidate_index is only non-empty for species whose
-    // meta.target_groups is set; bg_excl is built inside SET_DIFF_CALCULATIONS from
-    // --bg_index / --bg_excl_index.
-    SET_DIFF_CALCULATIONS(
-        BUILD_COLOR_INDEX.out.sbwt_index,
-        BUILD_COLOR_INDEX.out.candidate_index
+    // Lineage-specificity filtering, candidate index rebuild, and the ATB cross-species
+    // check (replaces the old bg_excl/markers sbwt set-diff) -- all keyed off the manifest's
+    // target_groups / atb_target_species columns, kept out of meta upstream so editing
+    // either doesn't bust the species index cache (see manifest_parse.nf).
+    MARKER_FILTERING(
+        BUILD_COLOR_INDEX.out.species_export,
+        MANIFEST_PARSE.out.target_groups,
+        MANIFEST_PARSE.out.atb_target_species
     )
 
     // Per-stage count checkpoints -> one funnel TSV of this run's own numbers.
     // Accumulate rows from every stage, then collectFile once at the end.
     checkpoint_rows = BUILD_COLOR_INDEX.out.checkpoints
-        .mix(SET_DIFF_CALCULATIONS.out.checkpoints)
+        .mix(MARKER_FILTERING.out.checkpoints)
 
     // Candidate marker post-processing -- off by default (see
-    // --marker_post_processing's help_text). markers is one .sbwt per
-    // species/lineage combo produced by SET_DIFF_CALCULATIONS; dump each to
-    // FASTA, then filter/mask for downstream assay design (primer3 and/or baits).
+    // --marker_post_processing's help_text). MARKER_FILTERING.out.markers is already one
+    // FASTA per species/lineage combo (ATB-checked, or unchecked with a warning -- see
+    // marker_filtering.nf); filter/mask it for downstream assay design (primer3 and/or baits).
     if (params.marker_post_processing) {
-        SBWT_DUMP_UNITIGS(SET_DIFF_CALCULATIONS.out.markers)
-        POST_PROCESS_MARKERS(SBWT_DUMP_UNITIGS.out.unitigs)
+        POST_PROCESS_MARKERS(MARKER_FILTERING.out.markers)
 
-        // Checkpoint the post-processing funnel: markers dumped to FASTA -> markers
-        // passing / rejected by the length + GC filter. `order` keys continue after
-        // the set-difference stages (which end at 80).
-        SBWT_DUMP_UNITIGS.out.unitigs.map    { meta, f -> [meta, 90, 'markers_dumped_fasta', 'fasta', f] }
-        | mix( POST_PROCESS_MARKERS.out.filtered.map { meta, f -> [meta, 100, 'markers_postproc_pass', 'fasta', f] } )
+        // Checkpoint the post-processing funnel: markers passing / rejected by the length
+        // + GC filter. `order` keys continue after marker_filtering.nf's stages (end at 80).
+        POST_PROCESS_MARKERS.out.filtered.map { meta, f -> [meta, 100, 'markers_postproc_pass', 'fasta', f] }
         | mix( POST_PROCESS_MARKERS.out.rejected.map { meta, f -> [meta, 110, 'markers_postproc_reject', 'fasta', f] } )
         | set { postproc_checkpoint_inputs }
 

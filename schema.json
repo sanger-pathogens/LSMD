@@ -4,7 +4,7 @@
     "Input options": {
       "manifest": {
         "default": "null",
-        "help_text": "Run manifest (required): a TSV with a header row and one data row per species. Columns: species (used as the output-file prefix and folder name), metadata (path to a .tsv/.csv), assemblies (path to a directory of FASTAs or a .txt list of assembly paths -- detected automatically), target_groups (optional, comma-separated --group_label values to discover markers for; blank = every group with >= candidate_min_genome_count genomes, excluding 'unclassified'). See assets/example_manifest.tsv."
+        "help_text": "Run manifest (required): a TSV with a header row and one data row per species. Columns: species (used as the output-file prefix and folder name), metadata (path to a .tsv/.csv), assemblies (path to a directory of FASTAs or a .txt list of assembly paths -- detected automatically), target_groups (optional, comma-separated --group_label values to discover markers for; blank = every group with >= candidate_min_genome_count genomes, excluding 'unclassified'), atb_target_species (optional, space-separated ATB colour name(s) for the ATB cross-species check, e.g. 'vibrio_cholerae'; blank = species skipped for that check, candidate markers pass through unchecked with a warning -- use when the species isn't in ATB). See assets/example_manifest.tsv."
       }
     },
     "Output options": {

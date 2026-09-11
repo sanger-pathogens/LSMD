@@ -31,7 +31,9 @@ process DESIGN_BAITS {
 
     container 'quay.io/sangerpathogens/baitstools:1.8.3'  // TODO(PAT-3586): build + push (containers/baitstools/Dockerfile)
 
-    publishDir mode: 'copy', path: "${params.outdir}/Final_markers/bait/${meta.ID}/"
+    // Bait-track counterpart of DESIGN_PRIMERS' 'primers/' -- lands beside that
+    // marker set once wired in (meta.ID is expected to be 'markers_<species>_<group>').
+    publishDir mode: 'copy', path: "${params.outdir}/${meta.ID}/baits/"
 
     input:
     tuple val(meta), path(markers_fasta)
