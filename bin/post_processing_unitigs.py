@@ -19,11 +19,13 @@ Use package SeqUtils to calculate GC%
 
 import argparse
 import sys
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from Bio import SeqIO
+from Bio.Seq import Seq
 from Bio.SeqUtils import gc_fraction
 
 
@@ -102,13 +104,43 @@ def soft_mask(seq: str, regions: List[Tuple[int, int]]) -> str:
     return "".join(chars)
 
 
+def dedupe_strand_pairs(records: List) -> Tuple[List, Dict[str, List[str]]]:
+    """Collapse forward/reverse-complement duplicate records to one per locus.
+
+    A de Bruijn graph is inherently double-stranded, and some dump tools (e.g.
+    `sbwt dump-unitigs` -- see PAT-3592) report both strand-walks of the same
+    unitig as separate records, not independent markers. Keep one
+    representative per canonical sequence (whichever orientation sorts
+    first); PCR primer design is strand-symmetric anyway (primer3 already
+    searches both strands of whatever template it's given), so nothing is
+    lost by dropping the duplicate -- only redundant downstream computation
+    and doubled marker counts.
+
+    Returns (deduped_records, dup_of) where dup_of maps the kept record's id
+    to the ids of every duplicate collapsed into it (a kept record can have
+    more than one duplicate, e.g. 3+ strand-walks of the same locus).
+    """
+    canonical_seen: Dict[str, str] = {}  # canonical seq -> kept record's id
+    dup_of: Dict[str, List[str]] = defaultdict(list)  # kept record's id -> collapsed duplicates' ids
+    deduped = []
+    for record in records:
+        seq_str = str(record.seq)
+        canonical = min(seq_str, str(Seq(seq_str).reverse_complement()))
+        if canonical in canonical_seen:
+            dup_of[canonical_seen[canonical]].append(record.id)
+            continue
+        canonical_seen[canonical] = record.id
+        deduped.append(record)
+    return deduped, dup_of
+
+
 def filter_unitigs(
     fasta_path: str,
     min_length: int = 100,
     min_gc: float = 35.0,
     max_gc: float = 60.0,
     window_size: int = 31,
-) -> Tuple[List[UnitigResult], List[UnitigResult]]:
+) -> Tuple[List[UnitigResult], List[UnitigResult], int]:
     # Filter unitigs by length and global GC content; soft-mask (don't reject)
     # local sliding-window GC dips as non-designable regions.
 
@@ -117,10 +149,12 @@ def filter_unitigs(
     if window_size > min_length:
         raise ValueError(f"window_size ({window_size}) cannot exceed min_length ({min_length})")
 
+    records, dup_of = dedupe_strand_pairs(list(SeqIO.parse(fasta_path, "fasta")))
+
     passed = []
     rejected = []
 
-    for record in SeqIO.parse(fasta_path, "fasta"):
+    for record in records:
         seq_str = str(record.seq)
         seq_len = len(seq_str)
         gc_pct = calculate_gc(seq_str)
@@ -154,7 +188,7 @@ def filter_unitigs(
     # Ranked by length - longest sequences first then by how far the GC% is from 50%
     passed.sort(key=lambda r: (-r.length, abs(r.gc_pct - 50.0)))
 
-    return passed, rejected
+    return passed, rejected, sum(len(dupes) for dupes in dup_of.values())
 
 
 def write_output(results: List[UnitigResult], output_path: str):
@@ -304,7 +338,7 @@ def main():
 
     # Filter
     print(f"Filtering {args.input}...", file=sys.stderr)
-    passed, rejected = filter_unitigs(
+    passed, rejected, n_dupes = filter_unitigs(
         args.input,
         min_length=args.min_length,
         min_gc=args.gc_min,
@@ -325,6 +359,8 @@ def main():
     print(f"  Output (passed): {output_path}", file=sys.stderr)
     if args.write_rejected:
         print(f"  Output (rejected): {reject_output_path}", file=sys.stderr)
+    if n_dupes:
+        print(f"  Forward/reverse-complement duplicates collapsed: {n_dupes}", file=sys.stderr)
     print(f"  Passed filters: {len(passed)}", file=sys.stderr)
     print(f"  Rejected: {len(rejected)}", file=sys.stderr)
     if passed:
