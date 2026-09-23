@@ -59,6 +59,9 @@ workflow {
                 "optional label_missing / label_multi / label_map / unclassified_genomes. " +
                 "See assets/example_manifest.tsv."
     }
+    if (params.primer3_design && !params.marker_post_processing) {
+        exit 1, "ERROR: --primer3_design needs --marker_post_processing (primer3 runs on the post-processed markers)."
+    }
     MANIFEST_PARSE(params.manifest)
     samples_ch = MANIFEST_PARSE.out.samples
 
