@@ -279,11 +279,11 @@ def plot_results(results: List[UnitigResult], output_path: str, min_gc: float, m
     if len(results) <= DIRECT_LABEL_MAX:
         ax.scatter(gcs, lengths, s=110, color="#2a78d6", alpha=0.85, edgecolors="black", linewidth=0.6, zorder=2)
         for rank, gc, length in zip(ranks, gcs, lengths):
-            ax.annotate(
-                str(rank), (gc, length), xytext=(4, 4), textcoords="offset points", fontsize=8, color="#0b0b0b"
-            )
+            ax.annotate(str(rank), (gc, length), xytext=(4, 4), textcoords="offset points", fontsize=8, color="#0b0b0b")
     else:
-        scatter = ax.scatter(gcs, lengths, c=ranks, cmap="viridis", s=80, alpha=0.7, edgecolors="black", linewidth=0.5, zorder=2)
+        scatter = ax.scatter(
+            gcs, lengths, c=ranks, cmap="viridis", s=80, alpha=0.7, edgecolors="black", linewidth=0.5, zorder=2
+        )
         cbar = plt.colorbar(scatter, ax=ax)
         cbar.set_label("Rank")
     ax.set_xlabel("GC Content (%)")
@@ -387,7 +387,10 @@ def main():
     if passed:
         lengths = [r.length for r in passed]
         gcs = [r.gc_pct for r in passed]
-        print(f"  Length range: {min(lengths)}–{max(lengths)} bp (median {statistics.median(lengths):.0f} bp)", file=sys.stderr)
+        print(
+            f"  Length range: {min(lengths)}–{max(lengths)} bp (median {statistics.median(lengths):.0f} bp)",
+            file=sys.stderr,
+        )
         print(f"  GC% range: {min(gcs):.1f}–{max(gcs):.1f}%", file=sys.stderr)
 
     # Plot (if requested)

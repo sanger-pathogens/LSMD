@@ -17,8 +17,8 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-from matplotlib.patches import Patch, Rectangle
+import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.patches import Patch, Rectangle  # noqa: E402
 
 BLUE = "#2a78d6"
 RED = "#c0392b"
@@ -91,13 +91,26 @@ def main():
 
     if rejected:
         ax.scatter(
-            [l for _, l, _, _ in rejected], [g for _, _, g, _ in rejected],
-            s=42, facecolor=RED, edgecolor="white", linewidth=0.4, alpha=0.75, zorder=2, label=f"Reject (n={len(rejected)})",
+            [l for _, l, _, _ in rejected],
+            [g for _, _, g, _ in rejected],
+            s=42,
+            facecolor=RED,
+            edgecolor="white",
+            linewidth=0.4,
+            alpha=0.75,
+            zorder=2,
+            label=f"Reject (n={len(rejected)})",
         )
     if passed:
         ax.scatter(
-            [l for _, l, _, _ in passed], [g for _, _, g, _ in passed],
-            s=90, facecolor=BLUE, edgecolor="white", linewidth=0.8, zorder=3, label=f"Pass (n={len(passed)})",
+            [l for _, l, _, _ in passed],
+            [g for _, _, g, _ in passed],
+            s=90,
+            facecolor=BLUE,
+            edgecolor="white",
+            linewidth=0.8,
+            zorder=3,
+            label=f"Pass (n={len(passed)})",
         )
         for mid, l, g, _ in passed:
             ax.annotate(mid, (l, g), textcoords="offset points", xytext=(6, 4), fontsize=8, color=INK)
@@ -113,17 +126,22 @@ def main():
         ax.spines[spine].set_visible(False)
 
     handles, labels = ax.get_legend_handles_labels()
-    handles.append(Patch(facecolor=BAND, edgecolor="none", label=f"QC band: ≥{LEN_MIN} bp, GC {GC_LO:.0f}–{GC_HI:.0f}%"))
+    handles.append(
+        Patch(facecolor=BAND, edgecolor="none", label=f"QC band: ≥{LEN_MIN} bp, GC {GC_LO:.0f}–{GC_HI:.0f}%")
+    )
     labels.append(f"QC band: ≥{LEN_MIN} bp, GC {GC_LO:.0f}–{GC_HI:.0f}%")
     ax.legend(handles, labels, loc="lower right", fontsize=9, frameon=True, framealpha=0.95)
 
     reject_reasons = sorted({r for _, _, _, r in rejected if r})
     reason_note = ", ".join(reject_reasons) if reject_reasons else "no reason recorded"
     fig.text(
-        0.5, -0.03,
+        0.5,
+        -0.03,
         "QC: length ≥ 100 bp and GC 35–60% required for primer suitability. "
         f"{len(rejected)} of {len(rejected) + len(passed)} candidate markers rejected ({reason_note}).",
-        ha="center", fontsize=8.5, color=INK2,
+        ha="center",
+        fontsize=8.5,
+        color=INK2,
     )
 
     plt.tight_layout()

@@ -19,9 +19,9 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap
-from matplotlib.patches import Rectangle
+import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.colors import LinearSegmentedColormap  # noqa: E402
+from matplotlib.patches import Rectangle  # noqa: E402
 
 INK = "#0b0b0b"
 INK2 = "#52514e"
@@ -88,8 +88,11 @@ def main():
         if col == args.target_column:
             tick.set_fontweight("bold")
     ax.set_xlabel(f"{args.target_column} Markers (n={n_cols})", fontsize=11, fontweight="bold")
-    ax.set_title(args.title or f"Candidate Markers vs Lineages/Sister Species: {args.target_column} Specificity",
-                 fontsize=13, fontweight="bold")
+    ax.set_title(
+        args.title or f"Candidate Markers vs Lineages/Sister Species: {args.target_column} Specificity",
+        fontsize=13,
+        fontweight="bold",
+    )
     ax.invert_yaxis()
     for spine in ax.spines.values():
         spine.set_visible(False)
@@ -98,7 +101,9 @@ def main():
     cbar = plt.colorbar(sm, ax=ax, fraction=0.03, pad=0.02)
     cbar.set_label("% of the marker's k-mers found in that colour", fontsize=9)
 
-    caption = args.caption or f"Red outline = off-target colour hit at ≥{args.border_min_frac:g}% (not {args.target_column})"
+    caption = (
+        args.caption or f"Red outline = off-target colour hit at ≥{args.border_min_frac:g}% (not {args.target_column})"
+    )
     fig.text(0.5, -0.04, caption, ha="center", va="top", fontsize=8, color=INK2)
 
     plt.tight_layout()

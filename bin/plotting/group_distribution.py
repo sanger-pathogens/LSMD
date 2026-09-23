@@ -22,7 +22,7 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # noqa: E402
 
 BLUE = "#2a78d6"
 GREY = "#9a9a96"
@@ -80,7 +80,11 @@ def main():
     ax.set_xlabel("Genomes (log scale)", fontsize=11, fontweight="bold")
     ax.set_ylabel("Group", fontsize=11, fontweight="bold")
     # TITLE TBC -- suggestion, meant to be improved:
-    ax.set_title(f"{args.species} Dataset Composition: {args.target_group} vs. {len(labels)-1} Other Groups", fontsize=13, fontweight="bold")
+    ax.set_title(
+        f"{args.species} Dataset Composition: {args.target_group} vs. {len(labels)-1} Other Groups",
+        fontsize=13,
+        fontweight="bold",
+    )
     ax.grid(axis="x", color=GRID, linewidth=0.8, zorder=0)
     ax.set_axisbelow(True)
     for spine in ("top", "right"):
@@ -88,9 +92,14 @@ def main():
 
     total = sum(values)
     fig.text(
-        0.5, -0.01,
-        f"{total:,} genomes total across {len(labels)} groups -- blue = target group for marker discovery, grey = every group markers must not cross-react with",
-        ha="center", va="top", fontsize=8, color=INK2,
+        0.5,
+        -0.01,
+        f"{total:,} genomes total across {len(labels)} groups -- blue = target group for marker discovery, "
+        "grey = every group markers must not cross-react with",
+        ha="center",
+        va="top",
+        fontsize=8,
+        color=INK2,
     )
 
     outdir = Path(args.outdir)

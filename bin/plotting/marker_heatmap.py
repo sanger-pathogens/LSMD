@@ -36,9 +36,9 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap
-from matplotlib.patches import Rectangle
+import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.colors import LinearSegmentedColormap  # noqa: E402
+from matplotlib.patches import Rectangle  # noqa: E402
 
 INK = "#0b0b0b"
 INK2 = "#52514e"
@@ -84,9 +84,7 @@ def build_matrix(validation_rows, detail_rows, target_group, min_display_frac, m
     # (a marker with zero off-target hits draws as one flat blue cell either way).
     if max_markers and len(validation_rows) > max_markers:
         off_target_hits = Counter(d["marker_id"] for d in detail_rows)
-        validation_rows = sorted(
-            validation_rows, key=lambda r: -off_target_hits.get(r["marker_id"], 0)
-        )[:max_markers]
+        validation_rows = sorted(validation_rows, key=lambda r: -off_target_hits.get(r["marker_id"], 0))[:max_markers]
 
     matrix = {}
     marker_order = []
@@ -123,8 +121,20 @@ def build_matrix(validation_rows, detail_rows, target_group, min_display_frac, m
     return matrix, marker_order, columns, hidden_count, n_columns_total
 
 
-def plot_heatmap(matrix, marker_order, columns, target_group, hidden_count, out_path, title, column_label,
-                  row_label, border_min_frac, n_total=None, binary_fill=False):
+def plot_heatmap(
+    matrix,
+    marker_order,
+    columns,
+    target_group,
+    hidden_count,
+    out_path,
+    title,
+    column_label,
+    row_label,
+    border_min_frac,
+    n_total=None,
+    binary_fill=False,
+):
     """Markers on x, species/lineages on y (target row pinned at top). A red
     border marks a cell only where that off-target row actually has a hit
     >= border_min_frac for that marker -- a 0%/white cell never gets one,
@@ -198,55 +208,70 @@ def main():
         help="Only show a non-target column if >=1 marker hits it at least this %% (default 1.0)",
     )
     p.add_argument(
-        "--column-label", default="ATB species", help="Y-axis label, e.g. 'ATB species' or 'Lineage' (default: 'ATB species')"
+        "--column-label",
+        default="ATB species",
+        help="Y-axis label, e.g. 'ATB species' or 'Lineage' (default: 'ATB species')",
     )
+    p.add_argument("--row-label", default=None, help="X-axis label (default: '<target_group> Markers')")
     p.add_argument(
-        "--row-label", default=None, help="X-axis label (default: '<target_group> Markers')"
-    )
-    p.add_argument(
-        "--border-min-frac", type=float, default=None,
+        "--border-min-frac",
+        type=float,
+        default=None,
         help="Only draw the red off-target-hit border on a cell if its hit fraction is >= this %% "
         "(default: same value as --min-display-frac)",
     )
     p.add_argument("--title", default=None, help="Figure title (default: a generic suggestion)")
     p.add_argument(
-        "--max-markers", type=int, default=80,
+        "--max-markers",
+        type=int,
+        default=80,
         help="Cap the number of marker rows plotted, keeping the ones with the most off-target hits "
         "(default: 80; pass 0 to disable -- not recommended past a few hundred markers, see module docstring)",
     )
     p.add_argument(
-        "--max-columns", type=int, default=30,
+        "--max-columns",
+        type=int,
+        default=30,
         help="Cap the number of non-target columns plotted, keeping the strongest off-target hits "
         "(default: 30; pass 0 to disable)",
     )
     p.add_argument(
-        "--verdict", choices=["all", "PASS", "FLAG", "ABSENT"], default="all",
+        "--verdict",
+        choices=["all", "PASS", "FLAG", "ABSENT"],
+        default="all",
         help="Only plot markers with this verdict (from the validation.tsv 'verdict' column); "
         "'all' (default) plots every scored marker regardless of verdict. Output filename gets "
         "a _<verdict> suffix when this isn't 'all'.",
     )
     p.add_argument(
-        "--only-bordered", action="store_true",
+        "--only-bordered",
+        action="store_true",
         help="After building the matrix, drop any marker that has no off-target cell at/above "
         "--border-min-frac (i.e. no red border anywhere in its row) -- e.g. to show PASS markers "
         "that still carry some off-target signal just under the FLAG threshold, not every clean one.",
     )
     p.add_argument(
-        "--out-name", default=None, help="Override the output filename (default: '<target_group>_marker_heatmap[_<verdict>].png')",
+        "--out-name",
+        default=None,
+        help="Override the output filename (default: '<target_group>_marker_heatmap[_<verdict>].png')",
     )
     p.add_argument(
-        "--first-n", type=int, default=None,
+        "--first-n",
+        type=int,
+        default=None,
         help="Take only the first N markers in the validation.tsv's own row order (after any --verdict "
         "filter, before any off-target-signal sorting) -- e.g. a simple preview slice, not 'strongest N'.",
     )
     p.add_argument(
-        "--binary-fill", action="store_true",
+        "--binary-fill",
+        action="store_true",
         help="Solid blue for the target column, plain white for every non-target cell regardless of "
         "value (no gradient, no colourbar) -- only honest when non-target values are all/nearly-all "
         "exactly 0 already; a real gradient still matters when off-target cells carry meaningful signal.",
     )
     p.add_argument(
-        "--keep-ids-file", default=None,
+        "--keep-ids-file",
+        default=None,
         help="Restrict to marker_ids listed in this file (one per line) -- e.g. a pre-computed "
         "fwd/revcomp-deduplicated canonical-ID list. Applied after --verdict, before --first-n.",
     )
@@ -284,13 +309,15 @@ def main():
 
     if args.only_bordered:
         marker_order = [
-            mid for mid in marker_order
+            mid
+            for mid in marker_order
             if any(v >= border_min_frac for col, v in matrix.get(mid, {}).items() if col != args.target_group)
         ]
         if not marker_order:
-            sys.exit(f"No markers have an off-target hit >= {border_min_frac:g}% -- nothing to plot with --only-bordered.")
+            sys.exit(
+                f"No markers have an off-target hit >= {border_min_frac:g}% -- nothing to plot with --only-bordered."
+            )
 
-    n_shown = len(marker_order)
     n_total = len(validation_rows) if args.max_markers else n_before_border_filter
 
     outdir = Path(args.outdir)
@@ -306,8 +333,18 @@ def main():
     title = args.title or default_title
     row_label = args.row_label or f"{args.target_group} Markers"
     plot_heatmap(
-        matrix, marker_order, columns, args.target_group, hidden_count, out_path, title,
-        args.column_label, row_label, border_min_frac, n_total, binary_fill=args.binary_fill,
+        matrix,
+        marker_order,
+        columns,
+        args.target_group,
+        hidden_count,
+        out_path,
+        title,
+        args.column_label,
+        row_label,
+        border_min_frac,
+        n_total,
+        binary_fill=args.binary_fill,
     )
     print(f"wrote {out_path}", file=sys.stderr)
 

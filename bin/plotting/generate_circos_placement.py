@@ -30,9 +30,11 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-PASS_COLOR = "blue"     # matches marker_heatmap.py / group_distribution.py: blue = the on-target story
-REJECT_COLOR = "grey"   # grey = not (yet) usable, not "wrong" -- same convention as group_distribution.py's "everything else"
-LINK_COLOR = "dgreen"   # candidate-merge links: a distinct third colour, its own channel (status), not magnitude
+PASS_COLOR = "blue"  # matches marker_heatmap.py / group_distribution.py: blue = the on-target story
+REJECT_COLOR = (
+    "grey"  # grey = not (yet) usable, not "wrong" -- same convention as group_distribution.py's "everything else"
+)
+LINK_COLOR = "dgreen"  # candidate-merge links: a distinct third colour, its own channel (status), not magnitude
 
 BLAST_FMT = "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send qcovhsp evalue bitscore"
 
@@ -86,19 +88,38 @@ def run_blastn(query_fasta, anchor_fasta, outdir):
     db_prefix = db_dir / "anchor"
     # no -parse_seqids: it wraps sseqid as "ref|ACCESSION|" in blastn's own
     # output, which then wouldn't match the bare accession .fai/karyotype use.
-    r = subprocess.run(["makeblastdb", "-in", str(anchor_fasta), "-dbtype", "nucl",
-                         "-out", str(db_prefix)], capture_output=True)
+    r = subprocess.run(
+        ["makeblastdb", "-in", str(anchor_fasta), "-dbtype", "nucl", "-out", str(db_prefix)], capture_output=True
+    )
     if r.returncode != 0:
         sys.exit(f"makeblastdb failed:\nstdout: {r.stdout.decode()}\nstderr: {r.stderr.decode()}")
 
     hits_path = Path(outdir) / "markers_vs_anchor.tsv"
     with open(hits_path, "w") as out:
         subprocess.run(
-            ["blastn", "-query", str(query_fasta), "-db", str(db_prefix),
-             "-task", "blastn", "-word_size", "11", "-dust", "no",
-             "-perc_identity", "90", "-evalue", "1", "-max_target_seqs", "5",
-             "-outfmt", BLAST_FMT],
-            check=True, stdout=out,
+            [
+                "blastn",
+                "-query",
+                str(query_fasta),
+                "-db",
+                str(db_prefix),
+                "-task",
+                "blastn",
+                "-word_size",
+                "11",
+                "-dust",
+                "no",
+                "-perc_identity",
+                "90",
+                "-evalue",
+                "1",
+                "-max_target_seqs",
+                "5",
+                "-outfmt",
+                BLAST_FMT,
+            ],
+            check=True,
+            stdout=out,
         )
     return hits_path
 
@@ -109,7 +130,9 @@ def load_hits(hits_path):
     with open(hits_path) as f:
         for line in f:
             cols = line.rstrip("\n").split("\t")
-            qseqid, sseqid, pident, length, mismatch, gapopen, qstart, qend, sstart, send, qcovhsp, evalue, bitscore = cols
+            qseqid, sseqid, pident, length, mismatch, gapopen, qstart, qend, sstart, send, qcovhsp, evalue, bitscore = (
+                cols
+            )
             bitscore = float(bitscore)
             if qseqid not in best or bitscore > best[qseqid]["bitscore"]:
                 sstart, send = int(sstart), int(send)
@@ -117,8 +140,11 @@ def load_hits(hits_path):
                 # (and so our karyotype contig keys) use the bare accession.
                 contig = sseqid.split("|")[1] if sseqid.count("|") >= 2 else sseqid
                 best[qseqid] = {
-                    "contig": contig, "start": min(sstart, send), "end": max(sstart, send),
-                    "bitscore": bitscore, "pident": float(pident),
+                    "contig": contig,
+                    "start": min(sstart, send),
+                    "end": max(sstart, send),
+                    "bitscore": bitscore,
+                    "pident": float(pident),
                 }
     return best
 
@@ -210,8 +236,11 @@ def build_merge_links(placements, contig_to_chr, merge_distance, outdir):
                     n_clustered_reject.add(id2)
 
     (Path(outdir) / "links.txt").write_text("\n".join(lines) + "\n")
-    print(f"wrote {outdir}/links.txt ({n_links} candidate-merge links within {merge_distance}bp; "
-          f"{len(n_clustered_reject)} otherwise-rejected markers sit in a cluster)", file=sys.stderr)
+    print(
+        f"wrote {outdir}/links.txt ({n_links} candidate-merge links within {merge_distance}bp; "
+        f"{len(n_clustered_reject)} otherwise-rejected markers sit in a cluster)",
+        file=sys.stderr,
+    )
     return n_clustered_reject
 
 
@@ -269,8 +298,11 @@ data_out_of_range* = trim
     (Path(outdir) / "circos.conf").write_text(conf)
     (Path(outdir) / "ideogram.conf").write_text(IDEOGRAM_CONF)
     (Path(outdir) / "ticks.conf").write_text(TICKS_CONF)
-    print(f"wrote {outdir}/circos.conf (+ ideogram.conf, ticks.conf) -- blue tile = PASS, grey tile = REJECT, "
-          f"{LINK_COLOR} link = within merge distance", file=sys.stderr)
+    print(
+        f"wrote {outdir}/circos.conf (+ ideogram.conf, ticks.conf) -- blue tile = PASS, grey tile = REJECT, "
+        f"{LINK_COLOR} link = within merge distance",
+        file=sys.stderr,
+    )
 
 
 def load_fasta_ids(path):
@@ -288,7 +320,12 @@ def main():
     p.add_argument("reject_fasta", help="post-processing REJECT markers (rejected_unitigs.fasta)")
     p.add_argument("anchor_fasta", help="one reference genome the target lineage carries (e.g. c6706)")
     p.add_argument("--anchor-label", default="c6706")
-    p.add_argument("--merge-distance", type=int, default=300, help="max bp gap between two markers to draw a candidate-merge link (default: 300)")
+    p.add_argument(
+        "--merge-distance",
+        type=int,
+        default=300,
+        help="max bp gap between two markers to draw a candidate-merge link (default: 300)",
+    )
     p.add_argument("-o", "--outdir", default="circos_placement", help="Output directory (default: circos_placement)")
     p.add_argument("--etc-dir", default=None, help="Existing circos etc/ dir (e.g. circos_tier3/etc)")
     p.add_argument("--image-name", default="circos_placement")
@@ -316,8 +353,11 @@ def main():
             continue
         placements.append((marker_id, verdict, hit))
     n_unplaced = len(pass_ids | reject_ids) - len(placements)
-    print(f"placed {len(placements)} / {len(pass_ids) + len(reject_ids)} markers on {args.anchor_label} "
-          f"({n_unplaced} had no blastn hit on the anchor)", file=sys.stderr)
+    print(
+        f"placed {len(placements)} / {len(pass_ids) + len(reject_ids)} markers on {args.anchor_label} "
+        f"({n_unplaced} had no blastn hit on the anchor)",
+        file=sys.stderr,
+    )
 
     lengths = contig_lengths(args.anchor_fasta, outdir / ".fai_cache")
     used_contigs = {hit["contig"] for _, _, hit in placements}
@@ -330,9 +370,11 @@ def main():
         sys.exit(f"--etc-dir not found ({etc_dir}) -- pass an existing circos etc/ (e.g. circos_tier3/etc)")
     build_conf(outdir, etc_dir, args.image_name)
 
-    print(f"\n{len(clustered_reject)} of {len(reject_ids)} REJECTed (too-short) markers sit within "
-          f"{args.merge_distance}bp of another marker -- worth checking those clusters for a mergeable amplicon.",
-          file=sys.stderr)
+    print(
+        f"\n{len(clustered_reject)} of {len(reject_ids)} REJECTed (too-short) markers sit within "
+        f"{args.merge_distance}bp of another marker -- worth checking those clusters for a mergeable amplicon.",
+        file=sys.stderr,
+    )
 
     if args.render:
         subprocess.run(["circos", "-conf", "circos.conf"], cwd=outdir, check=True)

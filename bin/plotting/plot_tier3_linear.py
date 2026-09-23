@@ -10,21 +10,25 @@ number of non-7PET genomes that also carry it (from the Tier 3 verdict table).
 """
 import csv
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-import numpy as np
+import matplotlib.colors as mcolors  # noqa: E402
+import matplotlib.pyplot as plt  # noqa: E402
 
-plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["DejaVu Sans", "Arial"],
-                     "svg.fonttype": "none", "pdf.fonttype": 42})
+plt.rcParams.update(
+    {
+        "font.family": "sans-serif",
+        "font.sans-serif": ["DejaVu Sans", "Arial"],
+        "svg.fonttype": "none",
+        "pdf.fonttype": 42,
+    }
+)
 
-REF = "n16961"                                     # type strain, El Tor O1 7PET
-CHR = {"NZ_LT906614": ("chromosome 1", 2961182),   # sizes from the assembly
-       "NZ_LT906615": ("chromosome 2", 1072331)}
+REF = "n16961"  # type strain, El Tor O1 7PET
+CHR = {"NZ_LT906614": ("chromosome 1", 2961182), "NZ_LT906615": ("chromosome 2", 1072331)}  # sizes from the assembly
 
 
 def main(blast_path, val_path, out_dir):
@@ -37,7 +41,7 @@ def main(blast_path, val_path, out_dir):
         leak[r["marker_id"]] = int(r["n_nontarget_genomes"])
 
     # marker position on the reference (one HSP per marker)
-    pos = {}   # marker -> (chrkey, midpoint)
+    pos = {}  # marker -> (chrkey, midpoint)
     with open(blast_path) as fh:
         for row in csv.reader(fh, delimiter="\t"):
             sub = row[1]
@@ -57,8 +61,7 @@ def main(blast_path, val_path, out_dir):
         ms.sort()
         for p, lk, m in ms:
             ax.vlines(p / 1e6, 0, max(lk, 0.8), color=cmap(norm(lk)), lw=2.2)
-            ax.scatter([p / 1e6], [max(lk, 0.8)], s=42, color=cmap(norm(lk)),
-                       edgecolor="#333", linewidth=0.5, zorder=3)
+            ax.scatter([p / 1e6], [max(lk, 0.8)], s=42, color=cmap(norm(lk)), edgecolor="#333", linewidth=0.5, zorder=3)
         ax.set_xlim(-0.03, size / 1e6 + 0.03)
         ax.set_ylim(0, vmax * 1.15 if vmax else 1)
         ax.set_yscale("symlog", linthresh=10)
@@ -69,7 +72,8 @@ def main(blast_path, val_path, out_dir):
         for s in ("top", "right"):
             ax.spines[s].set_visible(False)
 
-    sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap); sm.set_array([])
+    sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+    sm.set_array([])
     cb = fig.colorbar(sm, ax=axs, fraction=0.03, pad=0.02)
     cb.set_label("non-7PET genomes carrying the marker", fontsize=11)
     cb.ax.tick_params(labelsize=10)
@@ -81,11 +85,13 @@ def main(blast_path, val_path, out_dir):
     # append to README
     readme = d / "README.md"
     n_loci = len({(c, round(p, -3)) for m, (c, p) in pos.items()})
-    extra = (f"\n- **panel_E_genome_map** — every marker's position on the N16961 type-strain "
-             f"reference (2 chromosomes). One lollipop per marker; height & colour = number of "
-             f"non-7PET genomes that also carry it. The {len(pos)} markers collapse to ~{n_loci} "
-             f"loci — the vertical stacks are groups of near-duplicate candidate unitigs from one "
-             f"underlying sequence. Tall red stacks are the most non-specific loci.\n")
+    extra = (
+        f"\n- **panel_E_genome_map** — every marker's position on the N16961 type-strain "
+        f"reference (2 chromosomes). One lollipop per marker; height & colour = number of "
+        f"non-7PET genomes that also carry it. The {len(pos)} markers collapse to ~{n_loci} "
+        f"loci — the vertical stacks are groups of near-duplicate candidate unitigs from one "
+        f"underlying sequence. Tall red stacks are the most non-specific loci.\n"
+    )
     if readme.exists():
         readme.write_text(readme.read_text().rstrip() + "\n" + extra)
     else:

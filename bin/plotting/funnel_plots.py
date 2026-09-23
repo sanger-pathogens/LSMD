@@ -54,7 +54,7 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # noqa: E402
 
 # (real CHECKPOINT stage name, display name) -- fixed order, top to bottom.
 # candidate_dumped_fasta (Themisto2 Pseudoalignment vs ATB) deliberately excluded:
@@ -183,7 +183,11 @@ def plot_panel(ax, funnel, value_key, estimated_key, halved_key, title, xlabel, 
     labels = [f["display"] for f in funnel if f[value_key] is not None]
     values = [f[value_key] for f in funnel if f[value_key] is not None]
     colors = [STAGE_COLOR.get(f["stage"], BLUE) for f in funnel if f[value_key] is not None]
-    estimated = [f.get(estimated_key, False) for f in funnel if f[value_key] is not None] if estimated_key else [False] * len(values)
+    estimated = (
+        [f.get(estimated_key, False) for f in funnel if f[value_key] is not None]
+        if estimated_key
+        else [False] * len(values)
+    )
 
     y = list(range(len(labels)))[::-1]  # first stage at top
 
@@ -239,8 +243,19 @@ def main():
             fontweight="bold",
         )
 
-        plot_panel(axes[0], funnel, "kmer_count", "kmer_estimated", "kmer_halved", "K-mer count by stage", "K-mers Count (log scale)", show_ylabel=True)
-        plot_panel(axes[1], funnel, "unitig_count", None, "unitig_halved", "Unitig count by stage", "Unitigs Count (log scale)")
+        plot_panel(
+            axes[0],
+            funnel,
+            "kmer_count",
+            "kmer_estimated",
+            "kmer_halved",
+            "K-mer count by stage",
+            "K-mers Count (log scale)",
+            show_ylabel=True,
+        )
+        plot_panel(
+            axes[1], funnel, "unitig_count", None, "unitig_halved", "Unitig count by stage", "Unitigs Count (log scale)"
+        )
 
         plt.tight_layout(rect=[0, 0.02, 1, 0.93])
         out_path = outdir / f"{species}_{group_id}_count_funnel.png"

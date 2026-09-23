@@ -16,13 +16,15 @@ Here the panels are the five target GPSCs; each has its own candidate-marker set
 Usage: python3 make_plots_sp.py [root]   -- root defaults to the current directory,
 so run it from inside the validation run directory, or pass the path explicitly.
 """
+import csv
 import sys
 from pathlib import Path
-import csv
-import numpy as np
+
 import matplotlib
+import numpy as np
+
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # noqa: E402
 
 ROOT = Path(sys.argv[1]) if len(sys.argv) > 1 else Path.cwd()
 OUT = ROOT / "plots"
@@ -36,19 +38,28 @@ SPECIES_N = 42060
 BLUE = "#2a78d6"
 ORANGE = "#eb6834"
 AQUA = "#1baf7a"
-GREEN = "#008300"   # status: pass
-GREY = "#a9a89f"    # status: absent / n-a
+GREEN = "#008300"  # status: pass
+GREY = "#a9a89f"  # status: absent / n-a
 INK = "#0b0b0b"
 INK2 = "#52514e"
 GRID = "#e6e5e2"
 SURFACE = "#fcfcfb"
 
-plt.rcParams.update({
-    "figure.facecolor": SURFACE, "axes.facecolor": SURFACE, "savefig.facecolor": SURFACE,
-    "font.size": 12, "font.family": "DejaVu Sans",
-    "axes.edgecolor": INK2, "axes.linewidth": 0.8,
-    "text.color": INK, "axes.labelcolor": INK, "xtick.color": INK2, "ytick.color": INK2,
-})
+plt.rcParams.update(
+    {
+        "figure.facecolor": SURFACE,
+        "axes.facecolor": SURFACE,
+        "savefig.facecolor": SURFACE,
+        "font.size": 12,
+        "font.family": "DejaVu Sans",
+        "axes.edgecolor": INK2,
+        "axes.linewidth": 0.8,
+        "text.color": INK,
+        "axes.labelcolor": INK,
+        "xtick.color": INK2,
+        "ytick.color": INK2,
+    }
+)
 
 
 def tsv(path):
@@ -103,9 +114,16 @@ def fig_tier_a():
     ax = fig.add_axes([0.17, 0.20, 0.78, 0.52])
     ax.barh(y, n_mark, 0.6, color=GREEN, edgecolor=SURFACE, linewidth=2, zorder=2)
     for yi, nm, wm in zip(y, n_mark, within_med):
-        ax.annotate(f"{nm:,}   ·   100% pass   ·   median within-GPSC {wm:.0f}%",
-                    (nm, yi), xytext=(7, 0), textcoords="offset points",
-                    va="center", fontsize=9.3, fontweight="bold", color=INK)
+        ax.annotate(
+            f"{nm:,}   ·   100% pass   ·   median within-GPSC {wm:.0f}%",
+            (nm, yi),
+            xytext=(7, 0),
+            textcoords="offset points",
+            va="center",
+            fontsize=9.3,
+            fontweight="bold",
+            color=INK,
+        )
     ax.set_yticks(y)
     ax.set_yticklabels(ylabels(), fontsize=9.7)
     ax.set_xlabel("candidate markers", labelpad=8)
@@ -114,13 +132,20 @@ def fig_tier_a():
     ax.spines["left"].set_visible(False)
     style_ax(ax, axis="x")
 
-    header(fig, "All five GPSC marker sets pass Tier 1",
-           "Tier A — themisto pseudoalignment of every candidate marker back against the run's own "
-           "42,060-genome\nS. pneumoniae colour index. PASS = carried by ≥ 95% of the GPSC's own "
-           "genomes AND by ≤ 5% of any\nsingle other GPSC.   664 markers scored → 664 pass (100%).")
-    fig.text(0.017, 0.055,
-             "Marker yield is set by the upstream candidate filter, not by this check — GPSC 12 yields 478, GPSC 1 only 3.",
-             fontsize=8.3, color=INK2)
+    header(
+        fig,
+        "All five GPSC marker sets pass Tier 1",
+        "Tier A — themisto pseudoalignment of every candidate marker back against the run's own "
+        "42,060-genome\nS. pneumoniae colour index. PASS = carried by ≥ 95% of the GPSC's own "
+        "genomes AND by ≤ 5% of any\nsingle other GPSC.   664 markers scored → 664 pass (100%).",
+    )
+    fig.text(
+        0.017,
+        0.055,
+        "Marker yield is set by the upstream candidate filter, not by this check — GPSC 12 yields 478, GPSC 1 only 3.",
+        fontsize=8.3,
+        color=INK2,
+    )
     fig.savefig(OUT / "sp_01_tier_a.png", dpi=200)
     plt.close(fig)
     print("wrote", OUT / "sp_01_tier_a.png")
@@ -140,7 +165,7 @@ def _parse_b(g):
         elif "hit >=1 other named species" in ln:
             other = int(ln.split(":")[-1])
         elif "non-target species hit" in ln:
-            for sub in lines[i + 1:]:
+            for sub in lines[i + 1 :]:  # noqa: E203
                 s = sub.strip()
                 if not s or not s.startswith("streptococcus"):
                     break
@@ -163,17 +188,38 @@ def fig_tier_b():
     y = np.arange(len(GPSCS))[::-1]
     fig = plt.figure(figsize=(9.8, 6.0))
     ax = fig.add_axes([0.16, 0.20, 0.80, 0.48])
-    ax.barh(y, only_pct, 0.6, color=AQUA, edgecolor=SURFACE, linewidth=2,
-            label="hits S. pneumoniae only")
-    ax.barh(y, other_pct, 0.6, left=only_pct, color=ORANGE, edgecolor=SURFACE, linewidth=2,
-            label="also hits ≥ 1 other Streptococcus species")
+    ax.barh(y, only_pct, 0.6, color=AQUA, edgecolor=SURFACE, linewidth=2, label="hits S. pneumoniae only")
+    ax.barh(
+        y,
+        other_pct,
+        0.6,
+        left=only_pct,
+        color=ORANGE,
+        edgecolor=SURFACE,
+        linewidth=2,
+        label="also hits ≥ 1 other Streptococcus species",
+    )
     for yi, op, xp, o, x in zip(y, only_pct, other_pct, only, other):
         if op > 8:
-            ax.annotate(f"{op:.0f}%\n({o})", (op / 2, yi), ha="center", va="center",
-                        fontsize=9, fontweight="bold", color="white")
+            ax.annotate(
+                f"{op:.0f}%\n({o})",
+                (op / 2, yi),
+                ha="center",
+                va="center",
+                fontsize=9,
+                fontweight="bold",
+                color="white",
+            )
         if xp > 8:
-            ax.annotate(f"{xp:.0f}%\n({x})", (op + xp / 2, yi), ha="center", va="center",
-                        fontsize=9, fontweight="bold", color="white")
+            ax.annotate(
+                f"{xp:.0f}%\n({x})",
+                (op + xp / 2, yi),
+                ha="center",
+                va="center",
+                fontsize=9,
+                fontweight="bold",
+                color="white",
+            )
     ax.set_yticks(y)
     ax.set_yticklabels([f"GPSC {g[:-2]}\nn = {t}" for g, t in zip(GPSCS, tot)], fontsize=9.7)
     ax.set_xlabel("candidate markers  (%)", labelpad=8)
@@ -182,20 +228,23 @@ def fig_tier_b():
     ax.tick_params(axis="y", length=0)
     ax.spines["left"].set_visible(False)
     style_ax(ax, axis="x")
-    ax.legend(frameon=False, loc="lower left", bbox_to_anchor=(0.0, 1.03), fontsize=9,
-              handlelength=1.3, ncol=2)
-    header(fig, "Tier 2 — where the markers land across species",
-           "Tier B — pseudoalignment vs Jarno's ATB species-coloured index (12,733 species, k = 31). "
-           "SP core markers are ~35 bp\n(5 k-mers) — all below the 70-k-mer verdict threshold, so this "
-           "is the raw cross-species hit picture, not a pass/fail.")
+    ax.legend(frameon=False, loc="lower left", bbox_to_anchor=(0.0, 1.03), fontsize=9, handlelength=1.3, ncol=2)
+    header(
+        fig,
+        "Tier 2 — where the markers land across species",
+        "Tier B — pseudoalignment vs Jarno's ATB species-coloured index (12,733 species, k = 31). "
+        "SP core markers are ~35 bp\n(5 k-mers) — all below the 70-k-mer verdict threshold, so this "
+        "is the raw cross-species hit picture, not a pass/fail.",
+    )
     # top cross-hit species, pooled
     pooled = {}
     for t in tops:
         for name, c in t:
             pooled[name] = pooled.get(name, 0) + c
     top3 = sorted(pooled.items(), key=lambda kv: -kv[1])[:3]
-    txt = ("Cross-species hits are near-exclusively the mitis group:  "
-           + ",  ".join(f"{n} ({c})" for n, c in top3) + ", …")
+    txt = (
+        "Cross-species hits are near-exclusively the mitis group:  " + ",  ".join(f"{n} ({c})" for n, c in top3) + ", …"
+    )
     fig.text(0.017, 0.05, txt, fontsize=8.3, color=INK2)
     fig.savefig(OUT / "sp_02_tier_b.png", dpi=200)
     plt.close(fig)
@@ -227,15 +276,29 @@ def fig_tier_c():
     # PASS=BLUE, FLAG=ORANGE, ABSENT=GREY -- validated categorical pair for the
     # two that matter (blue<->orange), grey is the deliberate neutral null state.
     ax.barh(y, P, 0.6, color=BLUE, edgecolor=SURFACE, linewidth=2, label="PASS — target GPSC only")
-    ax.barh(y, F, 0.6, left=P, color=ORANGE, edgecolor=SURFACE, linewidth=2,
-            label="FLAG — also in ≥ 1 other genome")
-    ax.barh(y, A, 0.6, left=[p + f for p, f in zip(P, F)], color=GREY, edgecolor=SURFACE, linewidth=2,
-            label="ABSENT — in no assembly")
+    ax.barh(y, F, 0.6, left=P, color=ORANGE, edgecolor=SURFACE, linewidth=2, label="FLAG — also in ≥ 1 other genome")
+    ax.barh(
+        y,
+        A,
+        0.6,
+        left=[p + f for p, f in zip(P, F)],
+        color=GREY,
+        edgecolor=SURFACE,
+        linewidth=2,
+        label="ABSENT — in no assembly",
+    )
     for yi, p, f, a in zip(y, P, F, A):
         for val, base in ((p, 0), (f, p), (a, p + f)):
             if val > 7:
-                ax.annotate(f"{val:.0f}%", (base + val / 2, yi), ha="center", va="center",
-                            fontsize=9, fontweight="bold", color="white")
+                ax.annotate(
+                    f"{val:.0f}%",
+                    (base + val / 2, yi),
+                    ha="center",
+                    va="center",
+                    fontsize=9,
+                    fontweight="bold",
+                    color="white",
+                )
     ax.set_yticks(y)
     ax.set_yticklabels([f"GPSC {g[:-2]}\nn = {m}" for g, m in zip(GPSCS, n_mark)], fontsize=9.7)
     ax.set_xlabel("candidate markers  (%)")
@@ -245,9 +308,12 @@ def fig_tier_c():
     ax.spines["left"].set_visible(False)
     style_ax(ax, axis="x")
     ax.legend(frameon=False, loc="lower left", bbox_to_anchor=(0.0, 1.03), fontsize=9, ncol=3)
-    header(fig, "Tier 3 — strict blastn against all 42,060 S. pneumoniae assemblies",
-           "Tier C — blastn (pident ≥ 98, qcovhsp ≥ 80), two knobs only. A genome carries the "
-           "marker iff one HSP clears both.\nPASS = ≥ 1 target-GPSC genome AND zero others.")
+    header(
+        fig,
+        "Tier 3 — strict blastn against all 42,060 S. pneumoniae assemblies",
+        "Tier C — blastn (pident ≥ 98, qcovhsp ≥ 80), two knobs only. A genome carries the "
+        "marker iff one HSP clears both.\nPASS = ≥ 1 target-GPSC genome AND zero others.",
+    )
     fig.savefig(OUT / "sp_03_tier_c.png", dpi=200)
     plt.close(fig)
     print("wrote", OUT / "sp_03_tier_c.png")

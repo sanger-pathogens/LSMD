@@ -4,7 +4,8 @@ Lineage/group composition table -- the input-data-table companion to
 group_distribution.py's bar chart, for slides where a table reads better than
 a chart (e.g. an appendix/methods slide listing exact counts).
 
-Usage: python3 lineage_counts_table.py <color_mapping_stats.json> [-o OUTDIR] [--species "V. cholerae"] [--highlight 7PET]
+Usage: python3 lineage_counts_table.py <color_mapping_stats.json> [-o OUTDIR]
+           [--species "V. cholerae"] [--highlight 7PET]
 """
 import argparse
 import json
@@ -14,7 +15,7 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # noqa: E402
 
 INK = "#0b0b0b"
 INK2 = "#52514e"
@@ -41,8 +42,17 @@ def main():
     p.add_argument("stats_json", help="<species>_stats.json from BUILD_COLOR_INDEX:COLOR_MAPPING")
     p.add_argument("-o", "--outdir", default=".", help="Output directory (default: current dir)")
     p.add_argument("--species", default="V. cholerae", help="Species name for the title (default: 'V. cholerae')")
-    p.add_argument("--highlight", default="7PET", help="Group to highlight as the marker-discovery target (default: 7PET)")
-    p.add_argument("--exclude", default=None, help="Comma-separated group names to drop from the table entirely (e.g. 'unclassified' -- the no-metadata-row bucket, not a real lineage)")
+    p.add_argument(
+        "--highlight", default="7PET", help="Group to highlight as the marker-discovery target (default: 7PET)"
+    )
+    p.add_argument(
+        "--exclude",
+        default=None,
+        help=(
+            "Comma-separated group names to drop from the table entirely "
+            "(e.g. 'unclassified' -- the no-metadata-row bucket, not a real lineage)"
+        ),
+    )
     args = p.parse_args()
 
     with open(args.stats_json) as f:
@@ -92,15 +102,22 @@ def main():
 
     ax.set_title(
         f"{args.species}: Genomes per Group (n={total:,})",
-        fontsize=13, fontweight="bold", pad=6, y=1.0,
+        fontsize=13,
+        fontweight="bold",
+        pad=6,
+        y=1.0,
     )
     footnote = f"Highlighted row = {args.highlight}, the marker-discovery target group"
     if excluded:
         footnote += f"  |  excluded: {', '.join(excluded)} ({n_excluded:,} genomes, not a real lineage)"
     fig.text(
-        0.5, -0.01 / n_rows,
+        0.5,
+        -0.01 / n_rows,
         footnote,
-        ha="center", va="top", fontsize=8, color=INK2,
+        ha="center",
+        va="top",
+        fontsize=8,
+        color=INK2,
     )
 
     outdir = Path(args.outdir)

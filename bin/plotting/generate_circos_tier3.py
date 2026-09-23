@@ -29,9 +29,9 @@ Usage:
         [--representatives 10432-62=Non-7PET,mp_070116=Vibrioparacholerae,...] \\
         [--outdir circos_tier3] [--etc-dir circos_tier3/etc] [--render]
 """
-import re
 import argparse
 import csv
+import re
 import subprocess
 import sys
 from collections import Counter, defaultdict
@@ -185,7 +185,6 @@ def build_links(rows, anchor, representatives, contig_to_chr, outdir):
         if r["genome"] == anchor:
             anchor_hits[r["marker_id"]].append(r)
 
-    rep_genome_to_group = {g: grp for grp, g in representatives.items()}
     rep_genomes = set(representatives.values())
     rep_hits = defaultdict(list)
     for r in rows:
@@ -273,19 +272,52 @@ data_out_of_range* = trim
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("hsp_detail_tsv")
-    p.add_argument("fasta_dir", help="Directory of per-genome FASTAs (e.g. vibriowatch_cholera_fasta/fasta_files_clean)")
-    p.add_argument("--anchor", default="c6706", help="Anchor genome id, must appear as a 'genome' value in hsp_detail.tsv (default: c6706)")
-    p.add_argument("--target-group", default="7PET", help="The group the anchor belongs to / markers are specific to (default: 7PET)")
-    p.add_argument("--n-lineages", type=int, default=8, help="Max number of representative lineages to plot (default: 8, matches LINEAGE_COLORS length)")
-    p.add_argument("--representatives", default=None, help="Pin exact genome IDs instead of auto-selecting, as group=genome,group=genome,...")
-    p.add_argument("-o", "--outdir", default="circos_tier3_generated", help="Output directory (default: circos_tier3_generated)")
-    p.add_argument("--etc-dir", default=None, help="Existing circos etc/ dir to reference from circos.conf (default: <outdir>/etc, copy it in yourself or pass the original circos_tier3/etc)")
+    p.add_argument(
+        "fasta_dir", help="Directory of per-genome FASTAs (e.g. vibriowatch_cholera_fasta/fasta_files_clean)"
+    )
+    p.add_argument(
+        "--anchor",
+        default="c6706",
+        help="Anchor genome id, must appear as a 'genome' value in hsp_detail.tsv (default: c6706)",
+    )
+    p.add_argument(
+        "--target-group",
+        default="7PET",
+        help="The group the anchor belongs to / markers are specific to (default: 7PET)",
+    )
+    p.add_argument(
+        "--n-lineages",
+        type=int,
+        default=8,
+        help="Max number of representative lineages to plot (default: 8, matches LINEAGE_COLORS length)",
+    )
+    p.add_argument(
+        "--representatives",
+        default=None,
+        help="Pin exact genome IDs instead of auto-selecting, as group=genome,group=genome,...",
+    )
+    p.add_argument(
+        "-o", "--outdir", default="circos_tier3_generated", help="Output directory (default: circos_tier3_generated)"
+    )
+    p.add_argument(
+        "--etc-dir",
+        default=None,
+        help=(
+            "Existing circos etc/ dir to reference from circos.conf "
+            "(default: <outdir>/etc, copy it in yourself or pass the original circos_tier3/etc)"
+        ),
+    )
     p.add_argument("--image-name", default="circos_tier3", help="Output image basename (default: circos_tier3)")
-    p.add_argument("--render", action="store_true", help="Also run `circos -conf circos.conf` (needs the circos module loaded)")
+    p.add_argument(
+        "--render", action="store_true", help="Also run `circos -conf circos.conf` (needs the circos module loaded)"
+    )
     args = p.parse_args()
 
     if args.n_lineages > len(LINEAGE_COLORS):
-        sys.exit(f"--n-lineages {args.n_lineages} exceeds the fixed categorical palette length ({len(LINEAGE_COLORS)}); add more colours to LINEAGE_COLORS deliberately rather than cycling.")
+        sys.exit(
+            f"--n-lineages {args.n_lineages} exceeds the fixed categorical palette length ({len(LINEAGE_COLORS)}); "
+            "add more colours to LINEAGE_COLORS deliberately rather than cycling."
+        )
 
     pinned = None
     if args.representatives:
@@ -300,7 +332,10 @@ def main():
 
     representatives = pick_representatives(rows, args.anchor, args.target_group, args.n_lineages, pinned)
     if not representatives:
-        sys.exit("No representative lineages found -- check --anchor/--target-group match the table's 'genome'/'group' columns.")
+        sys.exit(
+            "No representative lineages found -- check --anchor/--target-group match "
+            "the table's 'genome'/'group' columns."
+        )
     print(f"representatives: {representatives}", file=sys.stderr)
 
     outdir = Path(args.outdir)
@@ -323,7 +358,10 @@ def main():
 
     etc_dir = args.etc_dir or (outdir / "etc")
     if not Path(etc_dir).exists():
-        sys.exit(f"{etc_dir} not found -- pass --etc-dir pointing at an existing circos etc/ (e.g. the original circos_tier3/etc), or copy one in first.")
+        sys.exit(
+            f"{etc_dir} not found -- pass --etc-dir pointing at an existing circos etc/ "
+            "(e.g. the original circos_tier3/etc), or copy one in first."
+        )
     build_conf(outdir, etc_dir, args.image_name)
 
     if args.render:

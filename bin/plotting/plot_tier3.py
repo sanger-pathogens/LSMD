@@ -14,19 +14,26 @@ Text for the deck goes to panels/README.md.
 """
 import csv
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import numpy as np
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
 
-plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["DejaVu Sans", "Arial"],
-                     "svg.fonttype": "none", "pdf.fonttype": 42})
+plt.rcParams.update(
+    {
+        "font.family": "sans-serif",
+        "font.sans-serif": ["DejaVu Sans", "Arial"],
+        "svg.fonttype": "none",
+        "pdf.fonttype": 42,
+    }
+)
 
-BAR = "#2166ac"          # bar fill
-ANNOT = "#c0392b"        # the second metric, in a contrasting colour
+BAR = "#2166ac"  # bar fill
+ANNOT = "#c0392b"  # the second metric, in a contrasting colour
 
 
 def save(fig, out):
@@ -57,9 +64,11 @@ def main(hsp_path, tally_path, target, out_dir):
             if len(row) <= imp:
                 continue
             n_hsp += 1
-            markers.add(row[im_]); genomes.add(row[ig])
+            markers.add(row[im_])
+            genomes.add(row[ig])
             pv, qv = float(row[ip]), float(row[iq])
-            bi = int((pv - 97.5) / 0.25); bj = int((qv - 79.0) / 1.0)
+            bi = int((pv - 97.5) / 0.25)
+            bj = int((qv - 79.0) / 1.0)
             if 0 <= bi < hist2d.shape[0] and 0 <= bj < hist2d.shape[1]:
                 hist2d[bi, bj] += 1
             for pp in row[imp].split(","):
@@ -85,27 +94,44 @@ def main(hsp_path, tally_path, target, out_dir):
     figA, a = plt.subplots(figsize=(9.5, max(3.5, 0.46 * len(g) + 1.4)))
     a.barh(y, pct_m, color=BAR, height=0.66)
     for i, (pm, mg) in enumerate(zip(pct_m, mean_grp)):
-        a.text(min(pm + 2, 102), i, f"{mg:.0f}%", va="center", ha="left",
-               fontsize=12.5, fontweight="bold", color=ANNOT)
-    a.set_yticks(y); a.set_yticklabels(g, fontsize=13)
+        a.text(min(pm + 2, 102), i, f"{mg:.0f}%", va="center", ha="left", fontsize=12.5, fontweight="bold", color=ANNOT)
+    a.set_yticks(y)
+    a.set_yticklabels(g, fontsize=13)
     a.set_xlabel(f"% of the {n_markers:,} markers that also occur in this lineage", fontsize=13)
     a.set_xlim(0, 112)
     a.tick_params(labelsize=12, length=0)
     for s in ("top", "right"):
         a.spines[s].set_visible(False)
-    a.text(0.985, 0.965,
-           f"{n_notspec:,} / {n_markers:,} markers also occur in >= 1\nnon-{target} genome  ({n_pass:,} pass Tier 3)",
-           transform=a.transAxes, ha="right", va="top", fontsize=12.5, fontweight="bold",
-           bbox=dict(boxstyle="round,pad=0.5", fc="#fdecea", ec="#c0392b"))
-    a.text(0.985, 0.02, "red = % of that lineage's genomes carrying the markers (mean)",
-           transform=a.transAxes, ha="right", fontsize=11, color=ANNOT, style="italic")
+    a.text(
+        0.985,
+        0.965,
+        f"{n_notspec:,} / {n_markers:,} markers also occur in >= 1\nnon-{target} genome  ({n_pass:,} pass Tier 3)",
+        transform=a.transAxes,
+        ha="right",
+        va="top",
+        fontsize=12.5,
+        fontweight="bold",
+        bbox=dict(boxstyle="round,pad=0.5", fc="#fdecea", ec="#c0392b"),
+    )
+    a.text(
+        0.985,
+        0.02,
+        "red = % of that lineage's genomes carrying the markers (mean)",
+        transform=a.transAxes,
+        ha="right",
+        fontsize=11,
+        color=ANNOT,
+        style="italic",
+    )
     save(figA, d / "panel_A_lineage_reach")
 
     # ---------- B : match quality ----------
     figB, b = plt.subplots(figsize=(7.5, 6))
     masked = np.ma.masked_where(hist2d.T == 0, hist2d.T)
     im = b.pcolormesh(PID_BINS, QC_BINS, masked, cmap="Blues")
-    cb = figB.colorbar(im, ax=b); cb.ax.tick_params(labelsize=11); cb.set_label("HSPs", fontsize=13)
+    cb = figB.colorbar(im, ax=b)
+    cb.ax.tick_params(labelsize=11)
+    cb.set_label("HSPs", fontsize=13)
     b.set_xlabel("percent identity", fontsize=13)
     b.set_ylabel("query coverage per HSP (%)", fontsize=13)
     b.tick_params(labelsize=12)
@@ -136,20 +162,31 @@ def main(hsp_path, tally_path, target, out_dir):
     save(figD, d / "panel_D_within_target")
 
     n_mm = sum(mmpos.values())
-    top = "; ".join(f"{t['group']} ({float(t['pct_markers_matched']):.0f}% of markers / "
-                    f"{float(t['mean_frac_of_group']):.0f}% of that lineage)" for t in tally[-6:][::-1])
+    top = "; ".join(
+        f"{t['group']} ({float(t['pct_markers_matched']):.0f}% of markers / "
+        f"{float(t['mean_frac_of_group']):.0f}% of that lineage)"
+        for t in tally[-6:][::-1]
+    )
     mode = next((w for w in ("core", "relaxed", "catchall") if w in str(hsp_path)), "")
-    (d / "README.md").write_text(f"""# Tier 3 panels — blastn, {target} {mode} (pident >= 98 / qcov >= 80)
+    (d / "README.md").write_text(
+        f"""# Tier 3 panels — blastn, {target} {mode} (pident >= 98 / qcov >= 80)
 
-{n_markers:,} markers vs {n_genomes:,} V. cholerae assemblies · **{n_pass:,} / {n_markers:,} PASS** ({n_notspec:,} also occur in >= 1 non-{target} genome).
+{n_markers:,} markers vs {n_genomes:,} V. cholerae assemblies ·
+**{n_pass:,} / {n_markers:,} PASS** ({n_notspec:,} also occur in >= 1 non-{target} genome).
 
-- **panel_A_lineage_reach** — bar: % of the {n_markers:,} markers that also occur in each non-{target} lineage. Red number beside each bar: mean % of that lineage's genomes carrying the markers. Worst: {top}.
-- **panel_B_match_quality** — pident vs query-coverage, {n_hsp:,} HSPs. The mass sits at ~100 / 100 — these are near-pristine matches, not marginal hits.
-- **panel_C_snp_position** — {n_mm:,} mismatches across all {n_hsp:,} HSPs; they cluster at the marker ends. The sequence is nearly invariant across the species.
-- **panel_D_within_target** — per marker, the % of hit {target} genomes carrying it — how consistently each marker is present in its own lineage.
+- **panel_A_lineage_reach** — bar: % of the {n_markers:,} markers that also occur in each non-{target} lineage.
+  Red number beside each bar: mean % of that lineage's genomes carrying the markers. Worst: {top}.
+- **panel_B_match_quality** — pident vs query-coverage, {n_hsp:,} HSPs.
+  The mass sits at ~100 / 100 — these are near-pristine matches, not marginal hits.
+- **panel_C_snp_position** — {n_mm:,} mismatches across all {n_hsp:,} HSPs; they cluster at the marker ends.
+  The sequence is nearly invariant across the species.
+- **panel_D_within_target** — per marker, the % of hit {target} genomes carrying it —
+  how consistently each marker is present in its own lineage.
 
-**Takeaway:** a large fraction of these markers are conserved sequence shared beyond {target} — the PAT-3570 result, by a third method.
-""")
+**Takeaway:** a large fraction of these markers are conserved sequence shared beyond {target} —
+the PAT-3570 result, by a third method.
+"""
+    )
     print(f"wrote 4 panels + README.md to {d}  ({n_markers:,} markers, {n_hsp:,} HSPs, {n_pass:,} PASS)")
 
 
