@@ -16,7 +16,7 @@ process DESIGN_PRIMERS {
     tuple val(meta), path(no_primers_tsv),  emit: no_primers
 
     script:
-    def id = "${meta.species}_${meta.lineage}"
+    def id = "${meta.species}_${meta.ID}"
     primers_tsv = "${id}_primers.tsv"
     no_primers_tsv = "${id}_no_primers.tsv"
     """
