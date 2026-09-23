@@ -32,7 +32,7 @@ include { BUILD_COLOR_INDEX } from './assorted-sub-workflows/themisto2/subworkfl
 include { MARKER_FILTERING } from './assorted-sub-workflows/themisto2/subworkflows/marker_filtering.nf'
 include { POST_PROCESS_MARKERS } from './modules/post_processing_markers.nf'
 include { DESIGN_PRIMERS } from './modules/primer3.nf'
-include { CHECKPOINT_COUNT } from './assorted-sub-workflows/themisto2/modules/checkpoint_count.nf'
+include { CHECKPOINT_FASTA } from './assorted-sub-workflows/themisto2/modules/checkpoint.nf'
 include { MANIFEST_PARSE } from './subworkflows/manifest_parse.nf'
 
 
@@ -55,7 +55,7 @@ workflow {
     // build_color_index.nf's header comment).
     if (!params.manifest) {
         exit 1, "ERROR: --manifest is required -- a TSV, one row per species, columns " +
-                "species / metadata / assemblies / target_groups / atb_target_species. " +
+                "species / metadata / assemblies / target_groups / atb_target_species / atb_exclude_species. " +
                 "See assets/example_manifest.tsv."
     }
     MANIFEST_PARSE(params.manifest)
@@ -65,12 +65,13 @@ workflow {
 
     // Lineage-specificity filtering, candidate index rebuild, and the ATB cross-species
     // check (replaces the old bg_excl/markers sbwt set-diff) -- all keyed off the manifest's
-    // target_groups / atb_target_species columns, kept out of meta upstream so editing
+    // target_groups / atb_target_species / atb_exclude_species columns, kept out of meta upstream so editing
     // either doesn't bust the species index cache (see manifest_parse.nf).
     MARKER_FILTERING(
         BUILD_COLOR_INDEX.out.species_export,
         MANIFEST_PARSE.out.target_groups,
-        MANIFEST_PARSE.out.atb_target_species
+        MANIFEST_PARSE.out.atb_target_species,
+        MANIFEST_PARSE.out.atb_exclude_species
     )
 
     // Per-stage count checkpoints -> one funnel TSV of this run's own numbers.
@@ -85,14 +86,12 @@ workflow {
     if (params.marker_post_processing) {
         POST_PROCESS_MARKERS(MARKER_FILTERING.out.markers)
 
-        // Checkpoint the post-processing funnel: markers passing / rejected by the length
-        // + GC filter. `order` keys continue after marker_filtering.nf's stages (end at 80).
         POST_PROCESS_MARKERS.out.filtered.map { meta, f -> [meta, 100, 'markers_postproc_pass', 'fasta', f] }
         | mix( POST_PROCESS_MARKERS.out.rejected.map { meta, f -> [meta, 110, 'markers_postproc_reject', 'fasta', f] } )
         | set { postproc_checkpoint_inputs }
 
-        CHECKPOINT_COUNT(postproc_checkpoint_inputs)
-        checkpoint_rows = checkpoint_rows.mix(CHECKPOINT_COUNT.out.row)
+        CHECKPOINT_FASTA(postproc_checkpoint_inputs)
+        checkpoint_rows = checkpoint_rows.mix(CHECKPOINT_FASTA.out.row)
 
         // Primer3 design -- off by default, and only meaningful once
         // POST_PROCESS_MARKERS has actually run (it needs the non_designable
@@ -104,10 +103,6 @@ workflow {
         }
     }
 
-    // Funnel TSV of this run's own numbers. Publish it only when intermediates
-    // are published -- same gate as CHECKPOINT_COUNT's `publishDir enabled:` --
-    // so a default run leaves no checkpoints/ dir. Without storeDir the file
-    // still collects, it just stays in the work dir.
     def counts_args = [name: 'pipeline_counts.tsv', keepHeader: true, skip: 1, sort: true]
     if( params.publish_intermediate )
         counts_args.storeDir = "${params.outdir}/checkpoints"

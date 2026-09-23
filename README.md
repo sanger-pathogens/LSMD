@@ -129,13 +129,15 @@ One row per species. Columns:
 | metadata | yes | Path to CSV/TSV file with Sample_ID + grouping column (--group_label); see below |
 | assemblies | yes | Directory of assembly FASTAs, or a .txt file listing one assembly path per line |
 | target_groups | no | Comma-separated `--group_label` values to discover markers for (e.g. `GPSC1,GPSC2`). Blank/absent = every group with ≥ `--candidate_min_genome_count` genomes. See the note below. |
+| atb_target_species | no | Space-separated ATB colour name(s) for the ATB cross-species check (candidate markers get pseudoaligned against [AllTheBacteria](https://github.com/AllTheBacteria/AllTheBacteria) to confirm they're specific to your species). **Write it as the full binomial with an underscore, lowercase** — e.g. `vibrio_cholerae`, not `v_cholerae` — because ATB's colour names don't match the short `species` key you use elsewhere in the manifest. Look the name(s) up in ATB's `color_names.txt` if unsure (`grep -i '<species>' <atb_color_names>`). Some species span more than one ATB colour (e.g. *S. pneumoniae* splits into lettered chunks `a`/`b`/`c`/...) — list the base name(s) here and the pipeline picks up clean lettered splits automatically. **Leave blank** if your species isn't in ATB at all: candidate markers then pass through this check unverified, with a loud warning in the log, rather than the run failing or markers being silently dropped. |
+| atb_exclude_species | no | Space-separated ATB colour name(s) left out of the ATB check's "absent from every other species" (`atb_max_outside`) test for this species, e.g. close relatives ATB can't reliably tell apart from your target. Same naming as `atb_target_species`. **Blank** = `unknown` (ATB's catch-all bucket for unassigned/low-confidence genomes). If you fill it in, add `unknown` yourself to keep excluding that bucket. |
 
 **Example:**
 
-| species | metadata | assemblies | target_groups |
-|---------|----------|-----------|----------------|
-| s_pneu | metadata.csv | /data/s_pneumoniae/ | GPSC1,GPSC2,GPSC3 |
-| v_cholerae | metadata.csv | /data/v_cholerae/ | 7PET,Non-7PET |
+| species | metadata | assemblies | target_groups | atb_target_species | atb_exclude_species |
+|---------|----------|-----------|----------------|---------------------|---------------------|
+| s_pneu | metadata.csv | /data/s_pneumoniae/ | GPSC1,GPSC2,GPSC3 | streptococcus_pneumoniae | |
+| v_cholerae | metadata.csv | /data/v_cholerae/ | 7PET,Non-7PET | vibrio_cholerae | unknown |
 
 Each row is processed independently; one run can build indexes for multiple species.
 

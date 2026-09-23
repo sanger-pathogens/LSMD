@@ -19,13 +19,18 @@
 //                       expand_target_species() picks up clean lettered splits of
 //                       whatever you list here automatically, you don't need to
 //                       enumerate those yourself.
+//   atb_exclude_species optional, space-separated ATB colour name(s) dropped from the
+//                       ATB check's max-outside side entirely (e.g. close relatives
+//                       ATB can't reliably separate from the target). Blank = 'unknown'
+//                       (ATB's catch-all bucket for unassigned/low-confidence genomes).
 //
-// Emits three channels, all keyed on the SAME slim meta [ID: <species>]:
+// Emits four channels, all keyed on the SAME slim meta [ID: <species>]:
 //   samples             [ [ID: <species>], <metadata file>, <assemblies path> ]
 //   target_groups       [ [ID: <species>], <target_groups string> ]
 //   atb_target_species  [ [ID: <species>], <atb_target_species string> ]
+//   atb_exclude_species [ [ID: <species>], <atb_exclude_species string> ]
 //
-// target_groups / atb_target_species are kept OUT of meta on purpose: meta rides
+// target_groups / atb_target_species / atb_exclude_species are kept OUT of meta on purpose: meta rides
 // through every species-wide build process (COLOR_MAPPING .. THEMISTO2_EXPORT) as
 // part of the task hash, but neither is consumed there -- only marker_filtering.nf
 // consumes them. Carrying either in meta would make an edit to it invalidate the
@@ -54,8 +59,9 @@ def parse_manifest_row(row) {
 
     def target_groups = (row.target_groups ?: "").trim()
     def atb_target_species = (row.atb_target_species ?: "").trim()
+    def atb_exclude_species = (row.atb_exclude_species ?: "").trim() ?: "unknown"
 
-    return [[ID: species], metadata, assemblies, target_groups, atb_target_species]
+    return [[ID: species], metadata, assemblies, target_groups, atb_target_species, atb_exclude_species]
 }
 
 workflow MANIFEST_PARSE {
@@ -66,10 +72,11 @@ workflow MANIFEST_PARSE {
     Channel.fromPath(manifest, checkIfExists: true)
         | splitCsv(header: true, sep: '\t', strip: true)
         | map { row -> parse_manifest_row(row) }
-        | multiMap { meta, metadata, assemblies, tg, atb_tgt ->
-            samples:            [meta, metadata, assemblies]
-            target_groups:      [meta, tg]
-            atb_target_species: [meta, atb_tgt]
+        | multiMap { meta, metadata, assemblies, tg, atb_tgt, atb_excl ->
+            samples:             [meta, metadata, assemblies]
+            target_groups:       [meta, tg]
+            atb_target_species:  [meta, atb_tgt]
+            atb_exclude_species: [meta, atb_excl]
           }
         | set { parsed }
 
@@ -77,4 +84,5 @@ workflow MANIFEST_PARSE {
     samples             = parsed.samples             // [ [ID], metadata, assemblies ]
     target_groups       = parsed.target_groups       // [ [ID], target_groups string ]
     atb_target_species  = parsed.atb_target_species  // [ [ID], atb_target_species string ]
+    atb_exclude_species = parsed.atb_exclude_species // [ [ID], atb_exclude_species string ]
 }
