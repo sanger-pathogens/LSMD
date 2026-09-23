@@ -4,7 +4,7 @@ process POST_PROCESS_MARKERS {
     label 'mem_2'
     label 'time_30m'
 
-    container 'quay.io/biocontainers/biopython:1.84'
+    container 'quay.io/sangerpathogens/pandas:2.2.1'
 
     publishDir mode: 'copy', path: "${params.outdir}/post_processed_markers/"
 
@@ -17,7 +17,7 @@ process POST_PROCESS_MARKERS {
     tuple val(meta), path(plot_png),       emit: plot,     optional: true
 
     script:
-    def id = "${meta.species}_${meta.lineage}"
+    def id = "${meta.species}_${meta.ID}"
     filtered_fasta = "${id}_markers.fasta"
     rejected_fasta = "${id}_rejected_markers.fasta"
     plot_png = "${id}_marker_analysis.png"
