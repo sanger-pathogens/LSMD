@@ -50,12 +50,13 @@ workflow {
     }
 
     // BUILD_COLOR_INDEX takes, per species: samples [ [ID: species], metadata_file,
-    // assembly_input ], from the --manifest TSV (one row per species), and builds ONLY the
+    // assembly_input, label_missing, label_multi, label_map, unclassified_genomes ], from the --manifest TSV (one row per species), and builds ONLY the
     // species-wide colour index -- no filtering happens there any more (see
     // build_color_index.nf's header comment).
     if (!params.manifest) {
         exit 1, "ERROR: --manifest is required -- a TSV, one row per species, columns " +
-                "species / metadata / assemblies / target_groups / atb_target_species / atb_exclude_species. " +
+                "species / metadata / assemblies / target_groups / atb_target_species / atb_exclude_species, " +
+                "optional label_missing / label_multi / label_map / unclassified_genomes. " +
                 "See assets/example_manifest.tsv."
     }
     MANIFEST_PARSE(params.manifest)
