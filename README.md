@@ -108,7 +108,7 @@ nextflow run main.nf \
   --marker_gc_max 60.0
 ```
 
-Filtered/soft-masked markers go to `my_output/post_processed_markers/`; designed primers to `my_output/<group>/primers/` (one `_primers.tsv` per group, plus `_no_primers.tsv` listing markers primer3 could not design against).
+Filtered/soft-masked markers go to `my_output/<species>/post_processed_markers/`; designed primers to `my_output/<species>/primers/<group>/` (one `_primers.tsv` per group, plus `_no_primers.tsv` listing markers primer3 could not design against).
 
 ## Input
 
@@ -142,7 +142,7 @@ Each row is processed independently; one run can build indexes for multiple spec
 - **Catch-all labels are real groups, not targets you want.** A label like `Non-7PET_unclassified` is not `unclassified`: it becomes its own group, and would become a target if `target_groups` were blank. For _V. cholerae_, **7PET is the only target**, so list `7PET` explicitly. `Non-7PET_unclassified` still does useful work as a non-target: it counts as an outside group, so markers that also appear in non-7PET genomes are rejected. It isn't dropped like `unclassified` genomes are
 - For species with many groups (e.g. _S. pneumoniae_ with 765+ GPSCs), specifying groups explicitly is more efficient than discovering markers for all of them
 
-**Note on folder naming:** `<group>` in the output paths is a placeholder for each value in your `--group_label` column. With `--group_label GPSC` you get `candidate_marker_filtering/streptococcus_pneumoniae_GPSC1_…`, `atb_cross_species/GPSC1/`, …; with `--group_label Lineage` and species `vibrio_cholerae` you get `atb_cross_species/7PET/`.
+**Note on folder naming:** `<group>` in the output paths is a placeholder for each value in your `--group_label` column. With `--group_label GPSC` you get `streptococcus_pneumoniae/candidate_marker_filtering/streptococcus_pneumoniae_GPSC1_…`, `streptococcus_pneumoniae/atb_cross_species/GPSC1/`, …; with `--group_label Lineage` and species `vibrio_cholerae` you get `vibrio_cholerae/atb_cross_species/7PET/`.
 
 ### Metadata table (per-species)
 
@@ -185,7 +185,7 @@ For any other `--group_label`, labels containing `;` are left as written.
 
 **The colour-mapping step stops if** `--group_label` is `GPSC` and a `;` label has a part that isn't a whole number (e.g. `5;abc`). All bad labels are listed; fix them in the metadata.
 
-**Checking the result:** every changed label is listed in `colour_mapping/<species>_stats.json` under `label_changes` (raw label, new label, genome count, and which rule changed it: `missing_value` or `gpsc_multi`), and printed in the colour-mapping log.
+**Checking the result:** every changed label is printed in the colour-mapping log and, with `--publish_intermediate`, listed in `<species>/colour_mapping/<species>_stats.json` under `label_changes` (raw label, new label, genome count, and which rule changed it: `missing_value` or `gpsc_multi`).
 
 ### Unclassified genomes
 
@@ -195,7 +195,7 @@ A genome ends up `unclassified` when:
 - its metadata label already reads `unclassified` (any case)
 - its assembly file has no metadata row (Sample_ID taken from the filename)
 
-Unclassified genomes are **always left out of the index**. They're listed in `colour_mapping/<species>_dropped_unclassified.tsv` with the reason (`missing_value`, `labelled_unclassified` or `no_metadata_row`). The colour-mapping step stops if no genomes are left.
+Unclassified genomes are **always left out of the index**. With `--publish_intermediate`, they're listed in `<species>/colour_mapping/<species>_dropped_unclassified.tsv` with the reason (`missing_value`, `labelled_unclassified` or `no_metadata_row`). The colour-mapping step stops if no genomes are left.
 
 **Markers are not checked against unclassified genomes.** There's no evidence that markers are absent from them. For _S. pneumoniae_ this includes GPS novel clusters (`NA`), which are real non-targets. Classify unknown genomes where possible, and validate markers against near-neighbours (e.g. with BLAST) as a backstop.
 
@@ -221,59 +221,70 @@ These apply to all species in the manifest:
 
 ## Output
 
-Results are written to `--outdir` (default: `./results`), one set per species.
+Results are written to `--outdir` (default: `./results`), in one folder per species, named from the manifest's `species` column (e.g. `results/vibrio_cholerae/`). Only `pipeline_info/` (Nextflow's run reports) and `checkpoints/` are run-wide.
+
+Outputs are either **final** (always published) or **intermediate** (published only with `--publish_intermediate`). Intermediates can be large: the species index export alone was ~250 GB for ~42k _S. pneumoniae_ genomes.
 
 ### Directory structure
 
 ```
 results/
-├── colour_mapping/
-│   ├── <species>_file_colours_input.txt         # Themisto input
-│   ├── <species>_label_mapping.tsv             # Sample_ID → group, ordered by colour ID
-│   ├── <species>_stats.json                    # Genome counts + label-cleaning summary
-│   └── <species>_dropped_unclassified.tsv      # Unclassified genomes left out of the index
-├── themisto2/
-│   ├── <species>_build/                        # Species-wide Themisto2 index
-│   ├── <species>_export/                       # Exported unitigs & colour sets
-│   └── candidate_<group>_build/                # Per-group candidate index (QC gate only)
-├── candidate_marker_filtering/
-│   ├── <species>_<group>_candidate_unitigs.fasta       # Group-core, group-specific candidates
-│   ├── <species>_<group>_specificity.tsv               # Unitig-level specificity scores
-│   └── <species>_<group>_stats.txt                     # Group-level filtering stats
-├── atb_cross_species/<group>/
-│   ├── <group>_atb_check_PASS.fasta            # Final markers (passed the ATB check)
-│   ├── <group>_atb_check_FLAG.fasta            # Also found in another ATB species (dropped)
-│   ├── <group>_atb_check_ABSENT.fasta          # Not found in the target species at all (dropped)
-│   ├── <group>_atb_check_validation.tsv        # Per-marker fractions, verdict and reason
-│   ├── <group>_atb_check_summary.txt           # Counts, pass rate, top off-target species
-│   └── <group>_atb_pseudoalign.jsonl           # Raw pseudoalignment against ATB
-├── post_processed_markers/                     # With --marker_post_processing
-│   ├── <species>_<group>_markers.fasta         # Soft-masked (length/GC filtered)
-│   ├── <species>_<group>_rejected_markers.fasta        # Rejected candidates
-│   └── <species>_<group>_marker_analysis.png           # Length/GC diagnostic plot
-├── <group>/primers/                            # With --primer3_design
-└── ggcat/, sbwt/, checkpoints/                 # With --publish_intermediate only
+├── pipeline_info/                                # Nextflow run reports
+├── checkpoints/pipeline_counts.tsv               # Intermediate: counts at each stage, all species
+└── <species>/
+    ├── colour_mapping/
+    │   ├── <species>_file_colours_input.txt       # Assembly paths in index (colour-ID) order
+    │   ├── <species>_label_mapping.tsv           # Sample_ID → group, ordered by colour ID
+    │   ├── <species>_stats.json                  # Intermediate: genome counts + label cleaning
+    │   └── <species>_dropped_unclassified.tsv    # Intermediate: unclassified genomes left out
+    ├── index/
+    │   ├── species_index.thm2                    # Species-wide Themisto2 colour index
+    │   ├── <group>_marker_index.thm2             # Each group's candidate-marker index
+    │   ├── ggcat/{species,groups/<group>}/                   # Intermediate: GGCAT unitigs
+    │   ├── sbwt/build/{species,groups/<group>}/              # Intermediate: SBWT index
+    │   ├── sbwt/dump_unitigs/groups/<group>/                 # Intermediate: unitigs dumped from the SBWT index
+    │   └── themisto2/export/species/                         # Intermediate: exported unitigs & colour sets
+    ├── candidate_marker_filtering/
+    │   ├── <species>_<group>_candidate_unitigs.fasta     # Group-core, group-specific candidates
+    │   ├── <species>_<group>_specificity.tsv             # Unitig-level specificity scores
+    │   └── <species>_<group>_stats.txt                   # Group-level filtering stats
+    ├── atb_cross_species/<group>/
+    │   ├── <group>_atb_check_PASS.fasta          # Final markers (passed the ATB check)
+    │   ├── <group>_atb_check_FLAG.fasta          # Also found in another ATB species (dropped)
+    │   ├── <group>_atb_check_ABSENT.fasta        # Not found in the target species at all (dropped)
+    │   ├── <group>_atb_check_validation.tsv      # Per-marker fractions, verdict and reason
+    │   ├── <group>_atb_check_summary.txt         # Counts, pass rate, top off-target species
+    │   └── <group>_atb_pseudoalign.jsonl         # Raw pseudoalignment against ATB
+    ├── post_processed_markers/                   # With --marker_post_processing
+    │   ├── <species>_<group>_markers.fasta       # Soft-masked (length/GC filtered)
+    │   ├── <species>_<group>_rejected_markers.fasta      # Rejected candidates
+    │   └── <species>_<group>_marker_analysis.png         # Length/GC diagnostic plot
+    └── primers/<group>/                          # With --primer3_design
 ```
 
 ### Key output files
 
-Paths are relative to `--outdir`.
+Paths are relative to `results/<species>/`.
 
 | File                                                                   | Description                                                                                                                                         |
 | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `colour_mapping/<species>_stats.json`                                  | Genomes written and dropped, groups, and every label change                                                                                         |
-| `colour_mapping/<species>_dropped_unclassified.tsv`                    | Unclassified genomes left out of the index, with the reason                                                                                         |
+| `colour_mapping/<species>_file_colours_input.txt`                      | Every assembly in the index, in colour-ID order                                                                                                     |
+| `colour_mapping/<species>_label_mapping.tsv`                           | Sample_ID → group for each colour ID                                                                                                                |
+| `index/species_index.thm2`                                             | The species-wide Themisto2 colour index                                                                                                             |
+| `index/<group>_marker_index.thm2`                                      | The Themisto2 index of a group's candidate markers                                                                                                  |
 | `candidate_marker_filtering/<species>_<group>_candidate_unitigs.fasta` | Candidate markers after group-specificity filtering, before the ATB check                                                                           |
 | `candidate_marker_filtering/<species>_<group>_specificity.tsv`         | Per-unitig within-group / max-outside-group presence (diagnostic)                                                                                   |
 | `atb_cross_species/<group>/<group>_atb_check_PASS.fasta`               | **Final markers**: candidates that passed the ATB cross-species check. For a species that isn't in ATB, the candidates go forward unchecked instead |
 | `atb_cross_species/<group>/<group>_atb_check_validation.tsv`           | Why each candidate passed or failed the ATB check                                                                                                   |
 | `post_processed_markers/<species>_<group>_markers.fasta`               | `--marker_post_processing`: markers filtered by length/GC and soft-masked (a subset of the final markers)                                           |
-| `<group>/primers/<species>_<group>_primers.tsv`                        | `--primer3_design`: designed primer pairs                                                                                                           |
-| `checkpoints/pipeline_counts.tsv`                                      | `--publish_intermediate`: marker counts at each stage                                                                                               |
+| `primers/<group>/<species>_<group>_primers.tsv`                        | `--primer3_design`: designed primer pairs                                                                                                           |
+| `colour_mapping/<species>_stats.json`                                  | `--publish_intermediate`: genomes written and dropped, groups, and every label change                                                               |
+| `colour_mapping/<species>_dropped_unclassified.tsv`                    | `--publish_intermediate`: unclassified genomes left out of the index, with the reason                                                               |
+| `../checkpoints/pipeline_counts.tsv`                                   | `--publish_intermediate`: counts at each stage, all species                                                                                         |
 
 ### stats.json fields
 
-`colour_mapping/<species>_stats.json` summarises how metadata and assemblies were matched up, then how labels were cleaned:
+`<species>/colour_mapping/<species>_stats.json` (published with `--publish_intermediate`) summarises how metadata and assemblies were matched up, then how labels were cleaned:
 
 | Field                                | Meaning                                                                                                              |
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
@@ -317,14 +328,14 @@ Run `nextflow run main.nf --help` for the full, always-up-to-date list.
 
 ### Core parameters
 
-| Option                   | Type    | Default     | Description                                                                                                                           |
-| ------------------------ | ------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `--manifest`             | path    | —           | **Required.** Manifest TSV (see [Input](#input))                                                                                      |
-| `--group_label`          | string  | —           | **Required.** Metadata column whose values become the groups                                                                          |
-| `--sample_col`           | string  | `Sample_ID` | Metadata column matched to assembly filenames                                                                                         |
-| `--assembly_suffix`      | string  | `.fasta`    | Suffix appended to `--sample_col` to form the expected filename (directory input only)                                                |
-| `--outdir`               | path    | `./results` | Output directory                                                                                                                      |
-| `--publish_intermediate` | boolean | `false`     | Also publish GGCAT unitigs, raw SBWT builds, dumped candidate unitigs and per-stage marker counts (`ggcat/`, `sbwt/`, `checkpoints/`) |
+| Option                   | Type    | Default     | Description                                                                                                                                                                            |
+| ------------------------ | ------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--manifest`             | path    | —           | **Required.** Manifest TSV (see [Input](#input))                                                                                                                                       |
+| `--group_label`          | string  | —           | **Required.** Metadata column whose values become the groups                                                                                                                           |
+| `--sample_col`           | string  | `Sample_ID` | Metadata column matched to assembly filenames                                                                                                                                          |
+| `--assembly_suffix`      | string  | `.fasta`    | Suffix appended to `--sample_col` to form the expected filename (directory input only)                                                                                                 |
+| `--outdir`               | path    | `./results` | Output directory                                                                                                                                                                       |
+| `--publish_intermediate` | boolean | `false`     | Also publish intermediates: GGCAT unitigs, SBWT indexes, dumped unitigs and the index export (`<species>/index/…`), the colour-mapping QC files, and per-stage counts (`checkpoints/`) |
 
 ### Index building
 
@@ -388,7 +399,7 @@ Try one of:
 
 ### Q: A group I expected is missing, or there's a group I didn't expect
 
-**A:** Check `label_changes` and `assemblies_per_group` in `colour_mapping/<species>_stats.json`. A GPSC label may have been merged (`gpsc_multi`), sent to `unclassified` and dropped (`missing_value`), or kept as written because no rule applied. Fix the label in the metadata.
+**A:** Check `label_changes` and `assemblies_per_group` in `<species>/colour_mapping/<species>_stats.json` (run with `--publish_intermediate`). A GPSC label may have been merged (`gpsc_multi`), sent to `unclassified` and dropped (`missing_value`), or kept as written because no rule applied. Fix the label in the metadata.
 
 ### Q: A big group is losing markers it should have
 

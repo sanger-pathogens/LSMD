@@ -6,7 +6,7 @@ process POST_PROCESS_MARKERS {
 
     container 'quay.io/sangerpathogens/pandas:2.2.1'
 
-    publishDir mode: 'copy', path: "${params.outdir}/post_processed_markers/"
+    publishDir mode: 'copy', path: "${params.outdir}/${meta.species}/post_processed_markers/"
 
     input:
     tuple val(meta), path(unitigs_fasta)

@@ -6,7 +6,7 @@ process DESIGN_PRIMERS {
 
     container 'quay.io/biocontainers/primer3:2.6.1--pl5321h503566f_7'
 
-    publishDir mode: 'copy', path: "${params.outdir}/${meta.ID}/primers/"
+    publishDir mode: 'copy', path: "${params.outdir}/${meta.species}/primers/${meta.ID}/"
 
     input:
     tuple val(meta), path(filtered_fasta)
