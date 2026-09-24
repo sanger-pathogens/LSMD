@@ -139,7 +139,7 @@ Each row is processed independently; one run can build indexes for multiple spec
 
 - **Specify groups explicitly** (e.g. `GPSC1,GPSC2,GPSC3`): Candidate markers are discovered only for the listed groups. Use the exact values from your `--group_label` column in the metadata, after [label cleaning](#cleaning-group-labels)
 - **Leave blank**: Candidate markers are discovered for **every** group with ≥ `--candidate_min_genome_count` genomes, after label cleaning. Only the exact label `unclassified` is skipped. Useful for exploring new datasets and discovering markers for all major groups automatically
-- **Catch-all labels are real groups, not targets you want.** A label like `Non-7PET_unclassified` is not `unclassified`: it becomes its own group, and would become a target if `target_groups` were blank. For _V. cholerae_, **7PET is the only target**, so list `7PET` explicitly. `Non-7PET_unclassified` still does useful work as a non-target: it counts as an outside group, so markers that also appear in non-7PET genomes are rejected. `unclassified_genomes` doesn't affect it
+- **Catch-all labels are real groups, not targets you want.** A label like `Non-7PET_unclassified` is not `unclassified`: it becomes its own group, and would become a target if `target_groups` were blank. For _V. cholerae_, **7PET is the only target**, so list `7PET` explicitly. `Non-7PET_unclassified` still does useful work as a non-target: it counts as an outside group, so markers that also appear in non-7PET genomes are rejected. It isn't dropped like `unclassified` genomes are
 - For species with many groups (e.g. _S. pneumoniae_ with 765+ GPSCs), specifying groups explicitly is more efficient than discovering markers for all of them
 
 **Note on folder naming:** `<group>` in the output paths is a placeholder for each value in your `--group_label` column. With `--group_label GPSC` you get `candidate_marker_filtering/streptococcus_pneumoniae_GPSC1_…`, `atb_cross_species/GPSC1/`, …; with `--group_label Lineage` and species `vibrio_cholerae` you get `atb_cross_species/7PET/`.
@@ -162,93 +162,54 @@ A CSV (comma-separated) file with one row per genome assembly. Required columns:
 | sample_3  | GPSC2 | UK      | sensitive  |
 | sample_4  | NA    | UK      | sensitive  |
 
-Sample 4's GPSC is a missing value, so it's labelled `unclassified` (see [Unclassified genomes](#unclassified-genomes)).
+Sample 4's GPSC is a missing value, so it's labelled `unclassified` and left out of the index (see [Unclassified genomes](#unclassified-genomes)).
 
 ### Cleaning group labels
 
-Group labels become colour groups. Messy labels create fake groups: `1215;5` would become its own group instead of GPSC5, and would then reject GPSC5's own markers as an "outside group". Three optional manifest columns clean labels **before** the index is built, so every later step (targets, genome-count thresholds, specificity filtering) uses the cleaned labels.
+Group labels become colour groups. Messy labels create fake groups: `1215;5` would become its own group instead of GPSC5, and would then reject GPSC5's own markers as an "outside group". Labels are cleaned **before** the index is built, so every later step (targets, genome-count thresholds, specificity filtering) uses the cleaned labels. There's nothing to configure: the rules are fixed.
 
 Metadata is read as plain text: `3` stays `3`, not `3.0`. Headers, sample IDs and labels are trimmed of surrounding spaces.
 
-Each label goes through these rules **in order**. The first match decides:
+Each label goes through these rules **in order**:
 
-| Order | Column          | What it does                                                                                                               |
-| ----- | --------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| 1     | `label_map`     | Exact `raw_label` → `group` override. Final: no later rule touches it. Map to `unclassified` to send a label to background |
-| 2     | `label_missing` | Labels that mean "no value" become `unclassified`                                                                          |
-| 3     | `label_multi`   | Labels containing `;`: `keep` as written, `smallest` whole number (`1215;5` → `5`), or send to `unclassified`              |
+| Order | Rule            | What it does                                                                                                                                                                                                                                                                                                                                     |
+| ----- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1     | Missing values  | Blank labels and the missing values below become `unclassified`                                                                                                                                                                                                                                                                                  |
+| 2     | GPSC `;` labels | Only when `--group_label` is `GPSC` (any case). A merge-history label becomes its smallest number, keeping its `GPSC` prefix if it has one: `1215;5` → `5`, `GPSC3;28` → `GPSC3`. **Exception:** 235 with 9 in any order or prefix form (`235;9`, `9;235`, `GPSC235;9`, `GPSC9;235`) becomes its own group `235_9` (`GPSC235_9` with the prefix) |
 
-Leave all three blank and labels are used as written, apart from the missing-value list.
+For any other `--group_label`, labels containing `;` are left as written.
 
-**`label_map` file** (tab-separated, header required):
-
-```tsv
-raw_label	group
-235;9	235_9
-```
-
-- Use an **absolute path**. Relative paths resolve against the launch directory, not the manifest
-- Editing the map triggers a rebuild of that species' index, even with `-resume`
-- A map entry's `group` can't be a missing value such as `NA`. Use `unclassified` instead
-- Also useful for renaming labels that would break output folder names (e.g. `;`, `/` or spaces), since groups appear in output paths
-
-**Built-in missing values** (used when `label_missing` is blank; matched case-insensitively):
+**Missing values** (matched case-insensitively):
 
 `""` `NA` `N/A` `#N/A` `NaN` `null` `none` `unknown` `missing` `-` `?` `.` `not applicable` `not available` `not collected` `not provided`
 
-If you fill in `label_missing`, it **replaces** this list. Empty labels always count as missing.
+**The colour-mapping step stops if** `--group_label` is `GPSC` and a `;` label has a part that isn't a whole number (e.g. `5;abc`). All bad labels are listed; fix them in the metadata.
 
-**The run stops, before any jobs start, if:**
-
-- `label_multi` or `unclassified_genomes` has an unrecognised value
-- the `label_map` path doesn't exist
-
-**The colour-mapping step stops if:**
-
-- the map lacks `raw_label` or `group` columns, lists a `raw_label` twice, has a blank `raw_label` or `group`, or maps to a missing value
-- `smallest` meets a `;` label that isn't all whole numbers (e.g. `5;abc`). All bad labels are listed; fix them with `label_map`
-
-**Checking the result:** every changed label is listed in `color_mapping/<species>_stats.json` under `label_changes` (raw label, new label, genome count, and which rule changed it), and printed in the colour-mapping log. Map entries that matched no label are listed under `label_map_unmatched`.
+**Checking the result:** every changed label is listed in `color_mapping/<species>_stats.json` under `label_changes` (raw label, new label, genome count, and which rule changed it: `missing_value` or `gpsc_multi`), and printed in the colour-mapping log.
 
 ### Unclassified genomes
 
 A genome ends up `unclassified` when:
 
 - its label is blank or a missing value
-- `label_map` or `label_multi` sent it there
-- its metadata label literally reads `unclassified`
+- its metadata label already reads `unclassified` (any case)
 - its assembly file has no metadata row (Sample_ID taken from the filename)
 
-`unclassified_genomes` decides what happens to them:
+Unclassified genomes are **always left out of the index**. They're listed in `color_mapping/<species>_dropped_unclassified.tsv` with the reason (`missing_value`, `labelled_unclassified` or `no_metadata_row`). The colour-mapping step stops if no genomes are left.
 
-| Value            | Effect                                                                                                                                                                                                                                     | Use when                                                             |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
-| `keep` (default) | Kept in the index as one `unclassified` group. **Never a target, but it does count as an outside group** (if ≥ `--candidate_min_genome_count` genomes), so it can reject markers                                                           | They're known non-targets, e.g. GPS novel clusters                   |
-| `drop`           | Removed from the index. Listed in `color_mapping/<species>_dropped_unclassified.tsv` with the reason (`label_missing`, `label_map`, `label_multi`, `labelled_unclassified` or `no_metadata_row`). **Markers are not checked against them** | Some may really be your target, so they'd wrongly reject its markers |
+**Markers are not checked against unclassified genomes.** There's no evidence that markers are absent from them. For _S. pneumoniae_ this includes GPS novel clusters (`NA`), which are real non-targets. Classify unknown genomes where possible, and validate markers against near-neighbours (e.g. with BLAST) as a backstop.
 
-With `drop`, there's no evidence that markers are absent from the dropped genomes. Classify unknown genomes where possible, and use marker validation (e.g. BLAST against near-neighbours) as a backstop.
-
-**Only genomes left out entirely, whatever the setting:** metadata rows whose assembly FASTA can't be found, and non-existent paths in a `.txt` assembly list.
+**Also left out:** metadata rows whose assembly FASTA can't be found, and non-existent paths in a `.txt` assembly list.
 
 ### Worked examples
 
-**_S. pneumoniae_ (GPSC).** Per the [GPS notes](https://www.pneumogen.net/gps/assigningGPSCs.html), a label like `1215;5` is a **merge history**: the canonical GPSC is the smaller number. `235;9` is the exception, a mixture rather than a merge. `NA` is a **novel cluster** with no GPSC yet.
+**_S. pneumoniae_ (GPSC).** Per the [GPS notes](https://www.pneumogen.net/gps/assigningGPSCs.html), a label like `1215;5` is a **merge history**: the canonical GPSC is the smaller number. `235;9` is the exception, a mixture rather than a merge. `NA` is a **novel cluster** with no GPSC yet. With `--group_label GPSC`:
 
-| Column                 | Value                       | Why                                                                                                         |
-| ---------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `label_multi`          | `smallest`                  | `1215;5` → `5`, `1250;156` → `156`                                                                          |
-| `label_map`            | optional: `235;9` → `235_9` | Safeguard. `235;9` isn't in the current GPS metadata, but `smallest` would fold it into GPSC9 if it appears |
-| `label_missing`        | blank                       | `NA` is in the built-in list                                                                                |
-| `unclassified_genomes` | `keep`                      | Novel clusters are real non-targets, so they should still reject cross-reacting markers                     |
+- `1215;5` → `5` and `1250;156` → `156`
+- `235;9` → `235_9`, its own group (it isn't in the current GPS metadata, but is handled if it appears)
+- `NA` → `unclassified`, dropped from the index, so markers aren't checked against novel clusters
 
-Result: 325 targets with `target_groups` blank, and GPSC5 grows from 1107 to 1135 genomes. The 74 `NA` genomes form one pooled outside group (see [Known limitations](#known-limitations-and-follow-ups)).
-
-**_V. cholerae_ (7PET).** 7PET is the only target.
-
-| Column                 | Value  | Why                                                                                                                                  |
-| ---------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `target_groups`        | `7PET` | Only 7PET gets markers. Every other lineage, including `Non-7PET_unclassified`, is an outside group that markers are checked against |
-| `unclassified_genomes` | `drop` | Genomes with no metadata row are of unknown lineage and may be 7PET, so they shouldn't reject 7PET markers                           |
+**_V. cholerae_ (7PET).** 7PET is the only target, so set `target_groups` to `7PET`. Every other lineage, including `Non-7PET_unclassified`, is an outside group that markers are checked against. Genomes with no metadata row are of unknown lineage and may be 7PET, so they're dropped rather than rejecting 7PET markers.
 
 ### Run-wide parameters
 
@@ -270,7 +231,7 @@ results/
 │   ├── <species>_file_colors_input.txt         # Themisto input
 │   ├── <species>_label_mapping.tsv             # Sample_ID → group, ordered by colour ID
 │   ├── <species>_stats.json                    # Genome counts + label-cleaning summary
-│   └── <species>_dropped_unclassified.tsv      # With unclassified_genomes = drop
+│   └── <species>_dropped_unclassified.tsv      # Unclassified genomes left out of the index
 ├── themisto2/
 │   ├── <species>_build/                        # Species-wide Themisto2 index
 │   ├── <species>_export/                       # Exported unitigs & colour sets
@@ -301,7 +262,7 @@ Paths are relative to `--outdir`.
 | File                                                                   | Description                                                                                                                                         |
 | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `color_mapping/<species>_stats.json`                                   | Genomes written and dropped, groups, and every label change                                                                                         |
-| `color_mapping/<species>_dropped_unclassified.tsv`                     | With `unclassified_genomes = drop`: genomes left out of the index, with the reason                                                                  |
+| `color_mapping/<species>_dropped_unclassified.tsv`                     | Unclassified genomes left out of the index, with the reason                                                                                         |
 | `candidate_marker_filtering/<species>_<group>_candidate_unitigs.fasta` | Candidate markers after group-specificity filtering, before the ATB check                                                                           |
 | `candidate_marker_filtering/<species>_<group>_specificity.tsv`         | Per-unitig within-group / max-outside-group presence (diagnostic)                                                                                   |
 | `atb_cross_species/<group>/<group>_atb_check_PASS.fasta`               | **Final markers**: candidates that passed the ATB cross-species check. For a species that isn't in ATB, the candidates go forward unchecked instead |
@@ -314,21 +275,20 @@ Paths are relative to `--outdir`.
 
 `color_mapping/<species>_stats.json` summarises how metadata and assemblies were matched up, then how labels were cleaned:
 
-| Field                                | Meaning                                                                                                                                                            |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `species`                            | Species name (the manifest `species` value)                                                                                                                        |
-| `group_label_column`                 | The `--group_label` column used                                                                                                                                    |
-| `assemblies_total`                   | `assemblies_written` + `assemblies_dropped_fasta_not_found` + `assemblies_dropped_unclassified`                                                                    |
-| `assemblies_written`                 | Genomes included in the index (one colour per line in the colour file)                                                                                             |
-| `assemblies_dropped_fasta_not_found` | Metadata rows whose expected assembly FASTA wasn't found on disk                                                                                                   |
-| `assemblies_dropped_unclassified`    | Genomes removed because `unclassified_genomes = drop` (listed in `_dropped_unclassified.tsv`)                                                                      |
-| `assembly_paths_missing_file`        | Entries in a `.txt` assembly path-list that don't exist on disk                                                                                                    |
-| `relabelled_unclassified`            | Metadata rows whose final label is `unclassified` because it was blank, a missing value, or sent there by `label_map` / `label_multi`                              |
-| `assemblies_without_metadata_row`    | Assembly files with no metadata row (labelled `unclassified`)                                                                                                      |
-| `assemblies_per_group`               | Genome count per group after cleaning, including `unclassified` when kept                                                                                          |
-| `label_settings`                     | The settings used: `label_map`, `label_missing` (the values), `label_missing_source` (`built-in list` or `--label-missing`), `label_multi`, `unclassified_genomes` |
-| `label_changes`                      | One entry per changed label: `raw_label`, `new_label`, `genomes`, and `changed_by` (`label_map`, `label_missing` or `label_multi`)                                 |
-| `label_map_unmatched`                | Map entries that matched no label (usually a typo)                                                                                                                 |
+| Field                                | Meaning                                                                                                              |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `species`                            | Species name (the manifest `species` value)                                                                          |
+| `group_label_column`                 | The `--group_label` column used                                                                                      |
+| `assemblies_total`                   | `assemblies_written` + `assemblies_dropped_fasta_not_found` + `assemblies_dropped_unclassified`                      |
+| `assemblies_written`                 | Genomes included in the index (one colour per line in the colour file)                                               |
+| `assemblies_dropped_fasta_not_found` | Metadata rows whose expected assembly FASTA wasn't found on disk                                                     |
+| `assemblies_dropped_unclassified`    | Unclassified genomes left out of the index (listed in `_dropped_unclassified.tsv`)                                   |
+| `assembly_paths_missing_file`        | Entries in a `.txt` assembly path-list that don't exist on disk                                                      |
+| `relabelled_unclassified`            | Metadata rows whose final label is `unclassified` because it was blank or a missing value                            |
+| `assemblies_without_metadata_row`    | Assembly files with no metadata row (labelled `unclassified`)                                                        |
+| `assemblies_per_group`               | Genome count per group after cleaning, including `unclassified` when kept                                            |
+| `missing_values`                     | The labels treated as missing (case-insensitive)                                                                     |
+| `label_changes`                      | One entry per changed label: `raw_label`, `new_label`, `genomes`, and `changed_by` (`missing_value` or `gpsc_multi`) |
 
 ## How it works
 
@@ -428,11 +388,11 @@ Try one of:
 
 ### Q: A group I expected is missing, or there's a group I didn't expect
 
-**A:** Check `label_changes` and `assemblies_per_group` in `color_mapping/<species>_stats.json`. A label may have been merged (`label_multi`), sent to `unclassified` (missing value or map), or kept as written because nothing matched. Fix it with `label_map`.
+**A:** Check `label_changes` and `assemblies_per_group` in `color_mapping/<species>_stats.json`. A GPSC label may have been merged (`gpsc_multi`), sent to `unclassified` and dropped (`missing_value`), or kept as written because no rule applied. Fix the label in the metadata.
 
 ### Q: A big group is losing markers it should have
 
-**A:** Look at the `outside_lineage` column in `<species>_<group>_specificity.tsv`. If the group rejecting markers is `unclassified` and may contain your target's genomes, set `unclassified_genomes = drop` or classify those genomes. If it's a label like `1215;5`, set `label_multi = smallest`.
+**A:** Look at the `outside_lineage` column in `<species>_<group>_specificity.tsv`. If it's a catch-all label (e.g. `Non-7PET_unclassified`) that may contain your target's genomes, classify those genomes. If it's a GPS merge label like `1215;5`, check `--group_label` is `GPSC` so it's merged into its GPSC.
 
 ### Q: The ATB check step is queued for a long time
 
@@ -440,13 +400,12 @@ Try one of:
 
 ### Q: Can I reuse indexes from a previous run?
 
-**A:** Yes, with `-resume` from the same launch directory and work directory. The species-wide index is reused as long as the metadata, assemblies and label columns are unchanged, so changing `--candidate_min_freq`, `target_groups` or the ATB settings only reruns the later steps.
+**A:** Yes, with `-resume` from the same launch directory and work directory. The species-wide index is reused as long as the metadata and assemblies are unchanged, so changing `--candidate_min_freq`, `target_groups` or the ATB settings only reruns the later steps.
 
 ## Known limitations and follow-ups
 
-- **Group labels with `/` or spaces** end up in output paths and may break them. Until this is checked and handled, rename such labels with `label_map`
-- **GPS `NA` genomes are one pooled outside group.** They're novel clusters, kept as real non-targets, but pooling different novel clusters into one group can hide a marker that's common in one of them. If popPUNK's `_clusters.csv` is available, they could be split into their real clusters
-- **`unclassified_genomes = drop` means markers aren't checked against dropped genomes.** A classification step for unknown genomes is planned before the pipeline runs
+- **Group labels with `/`, spaces or `;`** end up in output paths and commands and may break them. They aren't checked yet; rename such labels in the metadata (GPSC `;` labels are handled, see [Cleaning group labels](#cleaning-group-labels))
+- **Markers aren't checked against unclassified genomes**, since they're always dropped. For GPS this includes the `NA` novel clusters, which are real non-targets. Validate markers against near-neighbours (e.g. with BLAST) as a backstop. A classification step for unknown genomes is planned before the pipeline runs; if popPUNK's `_clusters.csv` is available, novel clusters could be given their real clusters and kept
 
 ## Software versions
 
