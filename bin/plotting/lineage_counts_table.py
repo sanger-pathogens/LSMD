@@ -4,7 +4,7 @@ Lineage/group composition table -- the input-data-table companion to
 group_distribution.py's bar chart, for slides where a table reads better than
 a chart (e.g. an appendix/methods slide listing exact counts).
 
-Usage: python3 lineage_counts_table.py <color_mapping_stats.json> [-o OUTDIR]
+Usage: python3 lineage_counts_table.py <colour_mapping_stats.json> [-o OUTDIR]
            [--species "V. cholerae"] [--highlight 7PET]
 """
 import argparse
@@ -38,8 +38,8 @@ plt.rcParams.update(
 
 
 def main():
-    p = argparse.ArgumentParser(description="Lineage/group counts table from color_mapping's *_stats.json")
-    p.add_argument("stats_json", help="<species>_stats.json from BUILD_COLOR_INDEX:COLOR_MAPPING")
+    p = argparse.ArgumentParser(description="Lineage/group counts table from colour_mapping's *_stats.json")
+    p.add_argument("stats_json", help="<species>_stats.json from BUILD_COLOUR_INDEX:COLOUR_MAPPING")
     p.add_argument("-o", "--outdir", default=".", help="Output directory (default: current dir)")
     p.add_argument("--species", default="V. cholerae", help="Species name for the title (default: 'V. cholerae')")
     p.add_argument(

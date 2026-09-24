@@ -116,13 +116,13 @@ Filtered/soft-masked markers go to `my_output/post_processed_markers/`; designed
 
 One row per species. Columns:
 
-| Column              | Required | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| species             | yes      | The species' [AllTheBacteria](https://github.com/AllTheBacteria/AllTheBacteria) (ATB) colour name: the full binomial, lowercase, with an underscore, e.g. `streptococcus_pneumoniae` or `vibrio_cholerae`. Used as the output-file prefix (so no whitespace or `/`) and as the target species of the ATB cross-species check. ATB splits some species into lettered chunks (_S. pneumoniae_ into `a`/`b`/`c`/...); give the base name and the chunks are picked up automatically. Check the name with `grep -i '<species>' <atb_color_names>`. **Not in ATB:** the run still goes ahead, but that species skips the ATB check (its markers go forward unverified) and the log warns at launch, suggesting the closest ATB names in case it's a typo |
-| metadata            | yes      | Path to a CSV file with Sample_ID + grouping column (--group_label); see below                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| assemblies          | yes      | Directory of assembly FASTAs, or a .txt file listing one assembly path per line                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| target_groups       | no       | Comma-separated `--group_label` values to discover markers for (e.g. `GPSC1,GPSC2`). Blank = every group with ≥ `--candidate_min_genome_count` genomes. See the note below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| atb_exclude_species | no       | Comma-separated ATB colour name(s) left out of the ATB check's "absent from every other species" (`atb_max_outside`) test for this species, e.g. close relatives ATB can't reliably tell apart from your target. `unknown` (ATB's catch-all bucket for unassigned/low-confidence genomes) is **always** excluded; anything listed here is added on top                                                                                                                                                                                                                                                                                                                                                                                              |
+| Column              | Required | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| species             | yes      | The species' [AllTheBacteria](https://github.com/AllTheBacteria/AllTheBacteria) (ATB) colour name: the full binomial, lowercase, with an underscore, e.g. `streptococcus_pneumoniae` or `vibrio_cholerae`. Used as the output-file prefix (so no whitespace or `/`) and as the target species of the ATB cross-species check. ATB splits some species into lettered chunks (_S. pneumoniae_ into `a`/`b`/`c`/...); give the base name and the chunks are picked up automatically. Check the name with `grep -i '<species>' <atb_colour_names>`. **Not in ATB:** the run still goes ahead, but that species skips the ATB check (its markers go forward unverified) and the log warns at launch, suggesting the closest ATB names in case it's a typo |
+| metadata            | yes      | Path to a CSV file with Sample_ID + grouping column (--group_label); see below                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| assemblies          | yes      | Directory of assembly FASTAs, or a .txt file listing one assembly path per line                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| target_groups       | no       | Comma-separated `--group_label` values to discover markers for (e.g. `GPSC1,GPSC2`). Blank = every group with ≥ `--candidate_min_genome_count` genomes. See the note below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| atb_exclude_species | no       | Comma-separated ATB colour name(s) left out of the ATB check's "absent from every other species" (`atb_max_outside`) test for this species, e.g. close relatives ATB can't reliably tell apart from your target. `unknown` (ATB's catch-all bucket for unassigned/low-confidence genomes) is **always** excluded; anything listed here is added on top                                                                                                                                                                                                                                                                                                                                                                                               |
 
 The manifest must be tab-separated with exactly these five header columns (any order). A `.csv` file, a comma-separated header, or a missing or unrecognised column stops the run before any jobs start.
 
@@ -185,7 +185,7 @@ For any other `--group_label`, labels containing `;` are left as written.
 
 **The colour-mapping step stops if** `--group_label` is `GPSC` and a `;` label has a part that isn't a whole number (e.g. `5;abc`). All bad labels are listed; fix them in the metadata.
 
-**Checking the result:** every changed label is listed in `color_mapping/<species>_stats.json` under `label_changes` (raw label, new label, genome count, and which rule changed it: `missing_value` or `gpsc_multi`), and printed in the colour-mapping log.
+**Checking the result:** every changed label is listed in `colour_mapping/<species>_stats.json` under `label_changes` (raw label, new label, genome count, and which rule changed it: `missing_value` or `gpsc_multi`), and printed in the colour-mapping log.
 
 ### Unclassified genomes
 
@@ -195,7 +195,7 @@ A genome ends up `unclassified` when:
 - its metadata label already reads `unclassified` (any case)
 - its assembly file has no metadata row (Sample_ID taken from the filename)
 
-Unclassified genomes are **always left out of the index**. They're listed in `color_mapping/<species>_dropped_unclassified.tsv` with the reason (`missing_value`, `labelled_unclassified` or `no_metadata_row`). The colour-mapping step stops if no genomes are left.
+Unclassified genomes are **always left out of the index**. They're listed in `colour_mapping/<species>_dropped_unclassified.tsv` with the reason (`missing_value`, `labelled_unclassified` or `no_metadata_row`). The colour-mapping step stops if no genomes are left.
 
 **Markers are not checked against unclassified genomes.** There's no evidence that markers are absent from them. For _S. pneumoniae_ this includes GPS novel clusters (`NA`), which are real non-targets. Classify unknown genomes where possible, and validate markers against near-neighbours (e.g. with BLAST) as a backstop.
 
@@ -227,8 +227,8 @@ Results are written to `--outdir` (default: `./results`), one set per species.
 
 ```
 results/
-├── color_mapping/
-│   ├── <species>_file_colors_input.txt         # Themisto input
+├── colour_mapping/
+│   ├── <species>_file_colours_input.txt         # Themisto input
 │   ├── <species>_label_mapping.tsv             # Sample_ID → group, ordered by colour ID
 │   ├── <species>_stats.json                    # Genome counts + label-cleaning summary
 │   └── <species>_dropped_unclassified.tsv      # Unclassified genomes left out of the index
@@ -261,8 +261,8 @@ Paths are relative to `--outdir`.
 
 | File                                                                   | Description                                                                                                                                         |
 | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `color_mapping/<species>_stats.json`                                   | Genomes written and dropped, groups, and every label change                                                                                         |
-| `color_mapping/<species>_dropped_unclassified.tsv`                     | Unclassified genomes left out of the index, with the reason                                                                                         |
+| `colour_mapping/<species>_stats.json`                                  | Genomes written and dropped, groups, and every label change                                                                                         |
+| `colour_mapping/<species>_dropped_unclassified.tsv`                    | Unclassified genomes left out of the index, with the reason                                                                                         |
 | `candidate_marker_filtering/<species>_<group>_candidate_unitigs.fasta` | Candidate markers after group-specificity filtering, before the ATB check                                                                           |
 | `candidate_marker_filtering/<species>_<group>_specificity.tsv`         | Per-unitig within-group / max-outside-group presence (diagnostic)                                                                                   |
 | `atb_cross_species/<group>/<group>_atb_check_PASS.fasta`               | **Final markers**: candidates that passed the ATB cross-species check. For a species that isn't in ATB, the candidates go forward unchecked instead |
@@ -273,7 +273,7 @@ Paths are relative to `--outdir`.
 
 ### stats.json fields
 
-`color_mapping/<species>_stats.json` summarises how metadata and assemblies were matched up, then how labels were cleaned:
+`colour_mapping/<species>_stats.json` summarises how metadata and assemblies were matched up, then how labels were cleaned:
 
 | Field                                | Meaning                                                                                                              |
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
@@ -294,7 +294,7 @@ Paths are relative to `--outdir`.
 
 ### Pipeline stages
 
-1. **BUILD_COLOR_INDEX**: clean group labels (see [Cleaning group labels](#cleaning-group-labels)), colour-map assemblies by group, and build a species-wide SBWT/Themisto2 index from all genomes. Changing any label column rebuilds this index, which takes a long time for large species (~42k genomes for GPSC), so set them before a run
+1. **BUILD_COLOUR_INDEX**: clean group labels (see [Cleaning group labels](#cleaning-group-labels)), colour-map assemblies by group, and build a species-wide SBWT/Themisto2 index from all genomes. Changing any label column rebuilds this index, which takes a long time for large species (~42k genomes for GPSC), so set them before a run
 2. **Group-specificity filtering**: for each target group (from `target_groups`, or every group with ≥ `--candidate_min_genome_count` genomes when it's left blank), keep only k-mers that are group-core (present in ≥ `--candidate_min_freq` of the group) and group-specific (present in ≤ `--specificity_max_outside` of any single other group)
 3. **Rebuild candidate index**: rebuild each group's filtered k-mers into its own SBWT/Themisto2 index (a QC gate), then dump it back to candidate unitigs
 4. **ATB cross-species check**: pseudoalign the candidates against the AllTheBacteria species index (`--atb_index`) and keep only markers found in ≥ `--atb_min_within` of the target species' k-mers and ≤ `--atb_max_outside` of any other ATB species → final markers. Species that aren't in ATB skip this step with a warning, and their candidates go forward unchecked
@@ -328,11 +328,11 @@ Run `nextflow run main.nf --help` for the full, always-up-to-date list.
 
 ### Index building
 
-| Option                    | Type    | Default | Description                                                                          |
-| ------------------------- | ------- | ------- | ------------------------------------------------------------------------------------ |
-| `--color_index_kmer_size` | integer | 31      | k-mer size for GGCAT/SBWT/Themisto2                                                  |
-| `--temp_dir`              | path    | —       | Scratch root for GGCAT/SBWT temp files (optional; falls back to task-local work dir) |
-| `--temp_space`            | integer | 10000   | Temp storage (MB) requested for processes needing it                                 |
+| Option                     | Type    | Default | Description                                                                          |
+| -------------------------- | ------- | ------- | ------------------------------------------------------------------------------------ |
+| `--colour_index_kmer_size` | integer | 31      | k-mer size for GGCAT/SBWT/Themisto2                                                  |
+| `--temp_dir`               | path    | —       | Scratch root for GGCAT/SBWT temp files (optional; falls back to task-local work dir) |
+| `--temp_space`             | integer | 10000   | Temp storage (MB) requested for processes needing it                                 |
 
 ### Group-specificity filtering
 
@@ -346,24 +346,24 @@ Run `nextflow run main.nf --help` for the full, always-up-to-date list.
 
 The defaults point at the ATB species index on the Sanger farm. Off the farm, supply your own.
 
-| Option              | Type  | Default                        | Description                                                            |
-| ------------------- | ----- | ------------------------------ | ---------------------------------------------------------------------- |
-| `--atb_index`       | path  | ATB-species.thm2 (Sanger farm) | Themisto2 index of AllTheBacteria, one colour per species              |
-| `--atb_color_names` | path  | color_names.txt (Sanger farm)  | Colour ID → ATB species name, matching `--atb_index`                   |
-| `--atb_min_within`  | float | 0.95                           | Minimum fraction of a marker's k-mers found in the target species      |
-| `--atb_max_outside` | float | `--specificity_max_outside`    | Maximum fraction of a marker's k-mers allowed in any other ATB species |
+| Option               | Type  | Default                        | Description                                                            |
+| -------------------- | ----- | ------------------------------ | ---------------------------------------------------------------------- |
+| `--atb_index`        | path  | ATB-species.thm2 (Sanger farm) | Themisto2 index of AllTheBacteria, one colour per species              |
+| `--atb_colour_names` | path  | color_names.txt (Sanger farm)  | Colour ID → ATB species name, matching `--atb_index`                   |
+| `--atb_min_within`   | float | 0.95                           | Minimum fraction of a marker's k-mers found in the target species      |
+| `--atb_max_outside`  | float | `--specificity_max_outside`    | Maximum fraction of a marker's k-mers allowed in any other ATB species |
 
 ### Marker post-processing (--marker_post_processing)
 
-| Option                     | Type    | Default                   | Description                                                                                |
-| -------------------------- | ------- | ------------------------- | ------------------------------------------------------------------------------------------ |
-| `--marker_post_processing` | boolean | `false`                   | Filter/mask markers for downstream assay design (primer3 and/or bait capture)              |
-| `--marker_min_length`      | integer | 100                       | Minimum marker length (bp)                                                                 |
-| `--marker_gc_min`          | float   | 35.0                      | Minimum global GC%                                                                         |
-| `--marker_gc_max`          | float   | 60.0                      | Maximum global GC%                                                                         |
-| `--marker_window_size`     | integer | `--color_index_kmer_size` | Sliding-window size (bp) for local GC check; out-of-range windows soft-masked (lowercased) |
-| `--marker_write_rejected`  | boolean | `true`                    | Write rejected candidates to separate FASTA                                                |
-| `--marker_plot`            | boolean | `true`                    | Generate length/GC diagnostic plot                                                         |
+| Option                     | Type    | Default                    | Description                                                                                |
+| -------------------------- | ------- | -------------------------- | ------------------------------------------------------------------------------------------ |
+| `--marker_post_processing` | boolean | `false`                    | Filter/mask markers for downstream assay design (primer3 and/or bait capture)              |
+| `--marker_min_length`      | integer | 100                        | Minimum marker length (bp)                                                                 |
+| `--marker_gc_min`          | float   | 35.0                       | Minimum global GC%                                                                         |
+| `--marker_gc_max`          | float   | 60.0                       | Maximum global GC%                                                                         |
+| `--marker_window_size`     | integer | `--colour_index_kmer_size` | Sliding-window size (bp) for local GC check; out-of-range windows soft-masked (lowercased) |
+| `--marker_write_rejected`  | boolean | `true`                     | Write rejected candidates to separate FASTA                                                |
+| `--marker_plot`            | boolean | `true`                     | Generate length/GC diagnostic plot                                                         |
 
 ### Primer design (--primer3_design)
 
@@ -388,7 +388,7 @@ Try one of:
 
 ### Q: A group I expected is missing, or there's a group I didn't expect
 
-**A:** Check `label_changes` and `assemblies_per_group` in `color_mapping/<species>_stats.json`. A GPSC label may have been merged (`gpsc_multi`), sent to `unclassified` and dropped (`missing_value`), or kept as written because no rule applied. Fix the label in the metadata.
+**A:** Check `label_changes` and `assemblies_per_group` in `colour_mapping/<species>_stats.json`. A GPSC label may have been merged (`gpsc_multi`), sent to `unclassified` and dropped (`missing_value`), or kept as written because no rule applied. Fix the label in the metadata.
 
 ### Q: A big group is losing markers it should have
 

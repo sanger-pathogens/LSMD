@@ -20,7 +20,7 @@
 #   contig_hit_fraction   : fraction of query contigs with any hit to this GPSC
 #                           (contigs_with_any_hit / total_contigs_used)
 #
-# {sample_id}.colors_per_contig.tsv  — one row per query contig
+# {sample_id}.colours_per_contig.tsv  — one row per query contig
 #   contig                : contig name from the query FASTA
 #   n_matched_refs        : number of reference genomes that matched this contig
 #   best_ref_kmer_coverage: fraction of contig k-mers covered by the
@@ -50,7 +50,7 @@ import pandas as pd
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Summarise Themisto2 pseudoalignment color hits by GPSC lineage.")
+    parser = argparse.ArgumentParser(description="Summarise Themisto2 pseudoalignment colour hits by GPSC lineage.")
 
     parser.add_argument(
         "--manifest",
@@ -67,7 +67,7 @@ def parse_args():
         "--mapping",
         required=True,
         type=Path,
-        help="Path to TSV mapping file where row index = Themisto color ID, with columns Sample_ID and GPSC.",
+        help="Path to TSV mapping file where row index = Themisto colour ID, with columns Sample_ID and GPSC.",
     )
 
     parser.add_argument(
@@ -155,19 +155,19 @@ def load_query_rows(manifest):
 
 def load_mapping(mapping_path):
     # validate sample_ID and GPSC columns in the mapping file
-    # preserve color-row ordering, color IDs are implicit by row. setup mapping.index
-    color2sample_mapping = pd.read_csv(mapping_path, sep="\t")
+    # preserve colour-row ordering, colour IDs are implicit by row. setup mapping.index
+    colour2sample_mapping = pd.read_csv(mapping_path, sep="\t")
 
     required_cols = {"Sample_ID", "GPSC"}
-    missing = required_cols - set(color2sample_mapping.columns)
+    missing = required_cols - set(colour2sample_mapping.columns)
 
     if missing:
         raise ValueError(f"Mapping file is missing required columns: {missing}. ")
 
-    color2sample_mapping["Sample_ID"] = color2sample_mapping["Sample_ID"].astype(str)
-    color2sample_mapping["GPSC"] = color2sample_mapping["GPSC"].astype(int)
+    colour2sample_mapping["Sample_ID"] = colour2sample_mapping["Sample_ID"].astype(str)
+    colour2sample_mapping["GPSC"] = colour2sample_mapping["GPSC"].astype(int)
 
-    return color2sample_mapping
+    return colour2sample_mapping
 
 
 def load_metadata(metadata_path):
@@ -268,24 +268,24 @@ def compute_contig_coverage(bases_covered_list, contig_length):
     return max(bases_covered_list) / contig_length
 
 
-def parse_themisto_output(jsonl_path, color2sample_mapping, contig_lengths, min_contig_coverage):
+def parse_themisto_output(jsonl_path, colour2sample_mapping, contig_lengths, min_contig_coverage):
     themisto_output = Path(jsonl_path)
 
     if not themisto_output.exists():
         raise FileNotFoundError(f"Themisto output not found: {themisto_output}")
 
-    gpsc_list = color2sample_mapping["GPSC"].tolist()
+    gpsc_list = colour2sample_mapping["GPSC"].tolist()
     n_ref = len(gpsc_list)
 
     cumulative_bases_cov = defaultdict(int)  # sum of raw bases covered per GPSC across all hits
     contig_lengths_by_gpsc = defaultdict(int)  # sum of query contig lengths that hit each GPSC
-    unique_colors_by_gpsc = defaultdict(set)
+    unique_colours_by_gpsc = defaultdict(set)
     contig_support = Counter()
-    colors_per_contig = []
+    colours_per_contig = []
     skipped_contigs = []
     parsed_json_records = 0
     parsed_json_records_used = 0
-    unmapped_color_ids = set()
+    unmapped_colour_ids = set()
 
     with themisto_output.open() as f:
         for line in f:
@@ -295,13 +295,13 @@ def parse_themisto_output(jsonl_path, color2sample_mapping, contig_lengths, min_
 
             rec = json.loads(line)
 
-            if "colors" not in rec:
+            if "colours" not in rec:
                 continue
 
             parsed_json_records += 1
 
             contig = rec.get("name", "unknown_contig")
-            colors = rec.get("colors", [])
+            colours = rec.get("colours", [])
             bases_covered_list = rec.get("bases_covered", [])
 
             contig_length = contig_lengths.get(contig)
@@ -313,7 +313,7 @@ def parse_themisto_output(jsonl_path, color2sample_mapping, contig_lengths, min_
 
             contig_record = {
                 "contig": contig,
-                "n_matched_refs": len(colors),
+                "n_matched_refs": len(colours),
                 "best_ref_kmer_coverage": coverage_fraction,
                 "passed_coverage_filter": passed,
             }
@@ -322,19 +322,19 @@ def parse_themisto_output(jsonl_path, color2sample_mapping, contig_lengths, min_
                 skipped_contigs.append(contig_record)
                 continue
 
-            colors_per_contig.append(contig_record)
+            colours_per_contig.append(contig_record)
             parsed_json_records_used += 1
             gpscs_on_this_contig = set()
 
-            for idx, color in enumerate(colors):
-                if color < 0 or color >= n_ref:
-                    unmapped_color_ids.add(color)
+            for idx, colour in enumerate(colours):
+                if colour < 0 or colour >= n_ref:
+                    unmapped_colour_ids.add(colour)
                     continue
 
-                gpsc = gpsc_list[color]
+                gpsc = gpsc_list[colour]
                 bases_cov = bases_covered_list[idx] if idx < len(bases_covered_list) else 0
                 cumulative_bases_cov[gpsc] += bases_cov
-                unique_colors_by_gpsc[gpsc].add(color)
+                unique_colours_by_gpsc[gpsc].add(colour)
                 gpscs_on_this_contig.add(gpsc)
 
             for gpsc in gpscs_on_this_contig:
@@ -344,22 +344,22 @@ def parse_themisto_output(jsonl_path, color2sample_mapping, contig_lengths, min_
     return {
         "cumulative_bases_cov": cumulative_bases_cov,
         "contig_lengths_by_gpsc": contig_lengths_by_gpsc,
-        "unique_colors_by_gpsc": unique_colors_by_gpsc,
+        "unique_colours_by_gpsc": unique_colours_by_gpsc,
         "contig_support": contig_support,
-        "colors_per_contig": colors_per_contig,
+        "colours_per_contig": colours_per_contig,
         "skipped_contigs": skipped_contigs,
         "parsed_json_records": parsed_json_records,
         "parsed_json_records_used": parsed_json_records_used,
-        "unmapped_color_ids": unmapped_color_ids,
+        "unmapped_colour_ids": unmapped_colour_ids,
     }
 
 
-def make_summary_tables(results, color2sample_mapping):
-    gpsc_size = color2sample_mapping["GPSC"].value_counts().to_dict()
+def make_summary_tables(results, colour2sample_mapping):
+    gpsc_size = colour2sample_mapping["GPSC"].value_counts().to_dict()
 
     all_gpscs = set(gpsc_size)
     all_gpscs.update(results["cumulative_bases_cov"].keys())
-    all_gpscs.update(results["unique_colors_by_gpsc"].keys())
+    all_gpscs.update(results["unique_colours_by_gpsc"].keys())
     all_gpscs.update(results["contig_support"].keys())
 
     rows = []
@@ -371,7 +371,7 @@ def make_summary_tables(results, color2sample_mapping):
         total_contig_len = results["contig_lengths_by_gpsc"].get(gpsc, 0)
         # length-weighted average breadth coverage across all query contigs hitting this GPSC
         avg_hit_breadth_cov = raw_bases / total_contig_len if total_contig_len else 0
-        unique_hits = len(results["unique_colors_by_gpsc"].get(gpsc, set()))
+        unique_hits = len(results["unique_colours_by_gpsc"].get(gpsc, set()))
         size = gpsc_size.get(gpsc, 0)
         contigs = results["contig_support"].get(gpsc, 0)
 
@@ -413,7 +413,7 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
 
     manifest = read_manifest(args.manifest)
-    color2sample_mapping = load_mapping(args.mapping)
+    colour2sample_mapping = load_mapping(args.mapping)
     metadata = load_metadata(args.metadata)
 
     manifest = resolve_gpsc_for_manifest(manifest, metadata)
@@ -426,12 +426,12 @@ def main():
 
         results = parse_themisto_output(
             jsonl_path=query["JSONL_path"],
-            color2sample_mapping=color2sample_mapping,
+            colour2sample_mapping=colour2sample_mapping,
             contig_lengths=contig_lengths,
             min_contig_coverage=args.min_contig_coverage,
         )
 
-        summary = make_summary_tables(results, color2sample_mapping)
+        summary = make_summary_tables(results, colour2sample_mapping)
 
         sorted_summary = summary.sort_values("gpsc_score", ascending=False)
         scores = sorted_summary["gpsc_score"]
@@ -451,7 +451,7 @@ def main():
         )
 
         contig_cols = ["contig", "n_matched_refs", "best_ref_kmer_coverage", "passed_coverage_filter"]
-        colors_per_contig = pd.DataFrame(results["colors_per_contig"], columns=contig_cols)
+        colours_per_contig = pd.DataFrame(results["colours_per_contig"], columns=contig_cols)
         skipped_contigs = pd.DataFrame(results["skipped_contigs"], columns=contig_cols)
 
         sorted_summary.head(args.top).to_csv(args.output / f"{sample_id}.gpsc_summary.tsv", sep="\t", index=False)
@@ -470,8 +470,8 @@ def main():
             ]
         ).to_csv(args.output / f"{sample_id}.classification.tsv", sep="\t", index=False)
 
-        colors_per_contig.sort_values("n_matched_refs", ascending=False).to_csv(
-            args.output / f"{sample_id}.colors_per_contig.tsv", sep="\t", index=False
+        colours_per_contig.sort_values("n_matched_refs", ascending=False).to_csv(
+            args.output / f"{sample_id}.colours_per_contig.tsv", sep="\t", index=False
         )
 
         if len(skipped_contigs) > 0:

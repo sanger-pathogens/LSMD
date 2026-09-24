@@ -28,7 +28,7 @@ def printHelp() {
 //
 // SUBWORKFLOWS
 //
-include { BUILD_COLOR_INDEX } from './assorted-sub-workflows/themisto2/subworkflows/build_color_index.nf'
+include { BUILD_COLOUR_INDEX } from './assorted-sub-workflows/themisto2/subworkflows/build_colour_index.nf'
 include { MARKER_FILTERING } from './assorted-sub-workflows/themisto2/subworkflows/marker_filtering.nf'
 include { POST_PROCESS_MARKERS } from './modules/post_processing_markers.nf'
 include { DESIGN_PRIMERS } from './modules/primer3.nf'
@@ -49,10 +49,10 @@ workflow {
         exit 0
     }
 
-    // BUILD_COLOR_INDEX takes, per species: samples [ [ID: species], metadata_file,
+    // BUILD_COLOUR_INDEX takes, per species: samples [ [ID: species], metadata_file,
     // assembly_input ], from the --manifest TSV (one row per species), and builds ONLY the
     // species-wide colour index -- no filtering happens there any more (see
-    // build_color_index.nf's header comment).
+    // build_colour_index.nf's header comment).
     if (!params.manifest) {
         exit 1, "ERROR: --manifest is required -- a TSV, one row per species, columns " +
                 "species / metadata / assemblies / target_groups / atb_exclude_species. " +
@@ -64,14 +64,14 @@ workflow {
     MANIFEST_PARSE(params.manifest)
     samples_ch = MANIFEST_PARSE.out.samples
 
-    BUILD_COLOR_INDEX(samples_ch)
+    BUILD_COLOUR_INDEX(samples_ch)
 
     // Lineage-specificity filtering, candidate index rebuild, and the ATB cross-species
     // check (replaces the old bg_excl/markers sbwt set-diff) -- all keyed off the manifest's
     // species (as the ATB target) / target_groups / atb_exclude_species columns, kept out of meta
     // upstream so editing either doesn't bust the species index cache (see manifest_parse.nf).
     MARKER_FILTERING(
-        BUILD_COLOR_INDEX.out.species_export,
+        BUILD_COLOUR_INDEX.out.species_export,
         MANIFEST_PARSE.out.target_groups,
         MANIFEST_PARSE.out.atb_target_species,
         MANIFEST_PARSE.out.atb_exclude_species
@@ -79,7 +79,7 @@ workflow {
 
     // Per-stage count checkpoints -> one funnel TSV of this run's own numbers.
     // Accumulate rows from every stage, then collectFile once at the end.
-    checkpoint_rows = BUILD_COLOR_INDEX.out.checkpoints
+    checkpoint_rows = BUILD_COLOUR_INDEX.out.checkpoints
         .mix(MARKER_FILTERING.out.checkpoints)
 
     // Candidate marker post-processing -- off by default (see

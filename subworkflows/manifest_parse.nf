@@ -7,7 +7,7 @@
 //                       the target of the ATB cross-species check (marker_filtering.nf).
 //                       ATB's lettered splits of a species (streptococcus_pneumoniaea,
 //                       ...b, ...) are picked up automatically by expand_target_species().
-//                       A species that isn't in --atb_color_names skips the ATB check with
+//                       A species that isn't in --atb_colour_names skips the ATB check with
 //                       a warning (and a "did you mean" suggestion, in case it's a typo).
 //   metadata            path to that species' metadata table
 //   assemblies          path to a directory of assemblies OR a .txt file listing
@@ -28,10 +28,10 @@
 //   atb_exclude_species [ [ID: <species>], <space-separated ATB colour names> ]
 //
 // target_groups / atb_target_species / atb_exclude_species are kept OUT of meta on purpose: meta rides
-// through every species-wide build process (COLOR_MAPPING .. THEMISTO2_EXPORT) as
+// through every species-wide build process (COLOUR_MAPPING .. THEMISTO2_EXPORT) as
 // part of the task hash, but neither is consumed there -- only marker_filtering.nf
 // consumes them. Carrying either in meta would make an edit to it invalidate the
-// entire species index on -resume. build_color_index.nf never sees them at all;
+// entire species index on -resume. build_colour_index.nf never sees them at all;
 // marker_filtering.nf joins them back in on the slim meta key.
 
 def manifest_columns() {
@@ -68,8 +68,8 @@ def check_manifest_format(manifest_file) {
 
 // Bare ATB colour names from color_names.txt ('<id>\tper_species_unitigs/<name>-unitigs-k31.fna'),
 // unwrapped the same way atb_cross_species_filter.py's _clean_atb_name() does.
-def load_atb_names(color_names_path) {
-    return file(color_names_path, checkIfExists: true).readLines()
+def load_atb_names(colour_names_path) {
+    return file(colour_names_path, checkIfExists: true).readLines()
         .findAll { it.trim() }
         .collect { line ->
             def name = line.contains('\t') ? line.split('\t', 2)[1] : line
@@ -135,7 +135,7 @@ def parse_manifest_row(row, atb_names) {
     def atb_target_species = species
     if (!in_atb(species, atb_names)) {
         def suggestions = closest_atb_names(species, atb_names)
-        log.warn("manifest (${species}): '${species}' isn't an ATB colour name in ${params.atb_color_names}, so its "
+        log.warn("manifest (${species}): '${species}' isn't an ATB colour name in ${params.atb_colour_names}, so its "
             + "markers will skip the ATB cross-species check UNVERIFIED."
             + (suggestions ? " Did you mean: ${suggestions.join(', ')}?" : ""))
         atb_target_species = ""
@@ -144,7 +144,7 @@ def parse_manifest_row(row, atb_names) {
     def excluded = (row.atb_exclude_species ?: "").split(',').collect { it.trim() }.findAll { it }
     excluded.findAll { !in_atb(it, atb_names) }.each { name ->
         def suggestions = closest_atb_names(name, atb_names)
-        log.warn("manifest (${species}): atb_exclude_species '${name}' couldn't be found in ${params.atb_color_names}, "
+        log.warn("manifest (${species}): atb_exclude_species '${name}' couldn't be found in ${params.atb_colour_names}, "
             + "so it has no effect. Please check the spelling."
             + (suggestions ? " Closest matches: ${suggestions.join(', ')}." : ""))
     }
@@ -160,7 +160,7 @@ workflow MANIFEST_PARSE {
     main:
     def manifest_file = file(manifest, checkIfExists: true)
     check_manifest_format(manifest_file)
-    def atb_names = load_atb_names(params.atb_color_names)
+    def atb_names = load_atb_names(params.atb_colour_names)
 
     Channel.fromPath(manifest_file)
         | splitCsv(header: true, sep: '\t', strip: true)
