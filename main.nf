@@ -50,14 +50,13 @@ workflow {
     }
 
     // BUILD_COLOR_INDEX takes, per species: samples [ [ID: species], metadata_file,
-    // assembly_input, label_missing, label_multi, label_map, unclassified_genomes ], from the --manifest TSV (one row per species), and builds ONLY the
+    // assembly_input ], from the --manifest TSV (one row per species), and builds ONLY the
     // species-wide colour index -- no filtering happens there any more (see
     // build_color_index.nf's header comment).
     if (!params.manifest) {
         exit 1, "ERROR: --manifest is required -- a TSV, one row per species, columns " +
-                "species / metadata / assemblies / target_groups / atb_target_species / atb_exclude_species, " +
-                "optional label_missing / label_multi / label_map / unclassified_genomes. " +
-                "See assets/example_manifest.tsv."
+                "species / metadata / assemblies / target_groups / atb_exclude_species. " +
+                "See the README's Input section."
     }
     if (params.primer3_design && !params.marker_post_processing) {
         exit 1, "ERROR: --primer3_design needs --marker_post_processing (primer3 runs on the post-processed markers)."
@@ -69,8 +68,8 @@ workflow {
 
     // Lineage-specificity filtering, candidate index rebuild, and the ATB cross-species
     // check (replaces the old bg_excl/markers sbwt set-diff) -- all keyed off the manifest's
-    // target_groups / atb_target_species / atb_exclude_species columns, kept out of meta upstream so editing
-    // either doesn't bust the species index cache (see manifest_parse.nf).
+    // species (as the ATB target) / target_groups / atb_exclude_species columns, kept out of meta
+    // upstream so editing either doesn't bust the species index cache (see manifest_parse.nf).
     MARKER_FILTERING(
         BUILD_COLOR_INDEX.out.species_export,
         MANIFEST_PARSE.out.target_groups,
