@@ -327,13 +327,13 @@ Run `nextflow run main.nf --help` for the full, always-up-to-date list.
 
 ### Core parameters
 
-| Option                   | Type    | Default     | Description                                                                                                                                                                            |
-| ------------------------ | ------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--manifest`             | path    | —           | **Required.** Manifest TSV (see [Input](#input))                                                                                                                                       |
-| `--group_label`          | string  | —           | **Required.** Metadata column whose values become the groups                                                                                                                           |
-| `--sample_col`           | string  | `Sample_ID` | Metadata column matched to assembly filenames                                                                                                                                          |
-| `--assembly_suffix`      | string  | `.fasta`    | Suffix appended to `--sample_col` to form the expected filename (directory input only)                                                                                                 |
-| `--outdir`               | path    | `./results` | Output directory                                                                                                                                                                       |
+| Option                   | Type    | Default     | Description                                                                                                                                                                   |
+| ------------------------ | ------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--manifest`             | path    | —           | **Required.** Manifest TSV (see [Input](#input))                                                                                                                              |
+| `--group_label`          | string  | —           | **Required.** Metadata column whose values become the groups                                                                                                                  |
+| `--sample_col`           | string  | `Sample_ID` | Metadata column matched to assembly filenames                                                                                                                                 |
+| `--assembly_suffix`      | string  | `.fasta`    | Suffix appended to `--sample_col` to form the expected filename (directory input only)                                                                                        |
+| `--outdir`               | path    | `./results` | Output directory                                                                                                                                                              |
 | `--publish_intermediate` | boolean | `false`     | Also publish intermediates: GGCAT unitigs, SBWT indexes, dumped unitigs, the index export and `themisto2 stats` output (`<species>/index/…`), and the colour-mapping QC files |
 
 ### Index building
@@ -356,11 +356,11 @@ Run `nextflow run main.nf --help` for the full, always-up-to-date list.
 
 The defaults point at the ATB species index on the Sanger farm. Off the farm, supply your own.
 
-| Option               | Type  | Default                        | Description                                                            |
-| -------------------- | ----- | ------------------------------ | ---------------------------------------------------------------------- |
-| `--atb_index`        | path  | ATB-species.thm2 (Sanger farm) | Themisto2 index of AllTheBacteria, one colour per species              |
-| `--atb_colour_names` | path  | color_names.txt (Sanger farm)  | Colour ID → ATB species name, matching `--atb_index`                   |
-| `--atb_min_within`   | float | 0.95                           | Minimum fraction of a marker's k-mers found in the target species      |
+| Option               | Type  | Default                        | Description                                                                                                         |
+| -------------------- | ----- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `--atb_index`        | path  | ATB-species.thm2 (Sanger farm) | Themisto2 index of AllTheBacteria, one colour per species                                                           |
+| `--atb_colour_names` | path  | color_names.txt (Sanger farm)  | Colour ID → ATB species name, matching `--atb_index`                                                                |
+| `--atb_min_within`   | float | 0.95                           | Minimum fraction of a marker's k-mers found in the target species                                                   |
 | `--atb_max_outside`  | float | `0.05`                         | Maximum fraction of a marker's k-mers allowed in any other ATB species (independent of `--specificity_max_outside`) |
 
 ### Marker post-processing (--marker_post_processing)
@@ -411,14 +411,14 @@ Try one of:
 
 ## Software versions
 
-| Software           | Version                     | Container                                               | Used by                                                                     |
-| ------------------ | --------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------- |
-| GGCAT              | 2.2.0                       | `quay.io/biocontainers/ggcat:2.2.0--hf1b6044_0`         | index building                                                              |
-| SBWT (sbwt-rs-cli) | 0.4.2 (patched, `-f93d92c`) | Sanger-internal `.sif`                                  | index building, candidate unitig dump                                       |
-| Themisto2          | 0.0.1                       | `quay.io/sangerpathogens/themisto2:0.0.1`               | index building, ATB pseudoalignment                                         |
-| pandas             | 2.2.1                       | `quay.io/sangerpathogens/pandas:2.2.1`                  | colour mapping, group-specificity filter, ATB check                         |
-| python_graphics    | 1.1.7                       | `quay.io/sangerpathogens/python_graphics:1.1.7`         | marker post-processing (Biopython, matplotlib)                              |
-| seqkit             | 2.10.0                      | `quay.io/biocontainers/seqkit:2.10.0--h9ee0642_0`       | per-stage count checkpoints                                                 |
+| Software           | Version                     | Container                                         | Used by                                             |
+| ------------------ | --------------------------- | ------------------------------------------------- | --------------------------------------------------- |
+| GGCAT              | 2.2.0                       | `quay.io/biocontainers/ggcat:2.2.0--hf1b6044_0`   | index building                                      |
+| SBWT (sbwt-rs-cli) | 0.4.2 (patched, `-f93d92c`) | Sanger-internal `.sif`                            | index building, candidate unitig dump               |
+| Themisto2          | 0.0.1                       | `quay.io/sangerpathogens/themisto2:0.0.1`         | index building, ATB pseudoalignment                 |
+| pandas             | 2.2.1                       | `quay.io/sangerpathogens/pandas:2.2.1`            | colour mapping, group-specificity filter, ATB check |
+| python_graphics    | 1.1.7                       | `quay.io/sangerpathogens/python_graphics:1.1.7`   | marker post-processing (Biopython, matplotlib)      |
+| seqkit             | 2.10.0                      | `quay.io/biocontainers/seqkit:2.10.0--h9ee0642_0` | per-stage count checkpoints                         |
 
 All software dependencies are containerised (Docker/Singularity).
 
