@@ -4,7 +4,7 @@ process POST_PROCESS_MARKERS {
     label 'mem_2'
     label 'time_30m'
 
-    container 'quay.io/sangerpathogens/pandas:2.2.1'
+    container 'quay.io/sangerpathogens/python_graphics:1.1.7'
 
     publishDir mode: 'copy', path: "${params.outdir}/${meta.species}/post_processed_markers/"
 

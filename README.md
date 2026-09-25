@@ -425,7 +425,8 @@ Try one of:
 | GGCAT              | 2.2.0                       | `quay.io/biocontainers/ggcat:2.2.0--hf1b6044_0`         | index building                                                              |
 | SBWT (sbwt-rs-cli) | 0.4.2 (patched, `-f93d92c`) | Sanger-internal `.sif`                                  | index building, candidate unitig dump                                       |
 | Themisto2          | 0.0.1                       | `quay.io/sangerpathogens/themisto2:0.0.1`               | index building, ATB pseudoalignment                                         |
-| pandas             | 2.2.1                       | `quay.io/sangerpathogens/pandas:2.2.1`                  | colour mapping, group-specificity filter, ATB check, marker post-processing |
+| pandas             | 2.2.1                       | `quay.io/sangerpathogens/pandas:2.2.1`                  | colour mapping, group-specificity filter, ATB check                         |
+| python_graphics    | 1.1.7                       | `quay.io/sangerpathogens/python_graphics:1.1.7`         | marker post-processing (Biopython, matplotlib)                              |
 | seqkit             | 2.10.0                      | `quay.io/biocontainers/seqkit:2.10.0--h9ee0642_0`       | per-stage count checkpoints                                                 |
 | primer3            | 2.6.1                       | `quay.io/biocontainers/primer3:2.6.1--pl5321h503566f_7` | primer design                                                               |
 
