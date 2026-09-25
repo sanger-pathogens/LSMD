@@ -32,7 +32,7 @@ include { BUILD_COLOUR_INDEX } from './assorted-sub-workflows/themisto2/subworkf
 include { MARKER_FILTERING } from './assorted-sub-workflows/themisto2/subworkflows/marker_filtering.nf'
 include { POST_PROCESS_MARKERS } from './modules/post_processing_markers.nf'
 include { DESIGN_PRIMERS } from './modules/primer3.nf'
-include { CHECKPOINT_FASTA } from './assorted-sub-workflows/themisto2/modules/checkpoint.nf'
+include { CHECKPOINT_FASTA; CHECKPOINT_REPORT } from './assorted-sub-workflows/themisto2/modules/checkpoint.nf'
 include { MANIFEST_PARSE } from './subworkflows/manifest_parse.nf'
 
 
@@ -89,8 +89,8 @@ workflow {
         MANIFEST_PARSE.out.atb_exclude_species
     )
 
-    // Per-stage count checkpoints -> one funnel TSV of this run's own numbers.
-    // Accumulate rows from every stage, then collectFile once at the end.
+    // Per-stage count checkpoints -> one pipeline_counts.tsv per species.
+    // Accumulate rows from every stage, then CHECKPOINT_REPORT once per species at the end.
     checkpoint_rows = BUILD_COLOUR_INDEX.out.checkpoints
         .mix(MARKER_FILTERING.out.checkpoints)
 
@@ -101,8 +101,8 @@ workflow {
     if (params.marker_post_processing) {
         POST_PROCESS_MARKERS(MARKER_FILTERING.out.markers)
 
-        POST_PROCESS_MARKERS.out.filtered.map { meta, f -> [meta, 100, 'markers_postproc_pass', 'fasta', f] }
-        | mix( POST_PROCESS_MARKERS.out.rejected.map { meta, f -> [meta, 110, 'markers_postproc_reject', 'fasta', f] } )
+        POST_PROCESS_MARKERS.out.filtered.map { meta, f -> [meta, 'markers_postproc_pass', 'fasta', f] }
+        | mix( POST_PROCESS_MARKERS.out.rejected.map { meta, f -> [meta, 'markers_postproc_reject', 'fasta', f] } )
         | set { postproc_checkpoint_inputs }
 
         CHECKPOINT_FASTA(postproc_checkpoint_inputs)
@@ -118,12 +118,11 @@ workflow {
         }
     }
 
-    def counts_args = [name: 'pipeline_counts.tsv', keepHeader: true, skip: 1, sort: true]
-    if( params.publish_intermediate )
-        counts_args.storeDir = "${params.outdir}/checkpoints"
-
+    // Rows sort into pipeline order inside CHECKPOINT_REPORT (see checkpoint_steps() in
+    // checkpoint.nf); always published to results/<species>/checkpoint/pipeline_counts.tsv.
     checkpoint_rows
-    | map { meta, row -> row }
-    | collectFile(counts_args)
+    | map { meta, row -> [meta.species ?: meta.ID, row] }
+    | groupTuple
+    | CHECKPOINT_REPORT
     // baitcapture tool TODO create in location: /data/pam/team230/sm71/scratch/gps_project/lsmd/modules/
 }

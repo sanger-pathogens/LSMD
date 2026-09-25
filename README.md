@@ -221,7 +221,7 @@ These apply to all species in the manifest:
 
 ## Output
 
-Results are written to `--outdir` (default: `./results`), in one folder per species, named from the manifest's `species` column (e.g. `results/vibrio_cholerae/`). Only `pipeline_info/` (Nextflow's run reports) and `checkpoints/` are run-wide.
+Results are written to `--outdir` (default: `./results`), in one folder per species, named from the manifest's `species` column (e.g. `results/vibrio_cholerae/`). Only `pipeline_info/` (Nextflow's run reports) is run-wide.
 
 Outputs are either **final** (always published) or **intermediate** (published only with `--publish_intermediate`). Intermediates can be large: the species index export alone was ~250 GB for ~42k _S. pneumoniae_ genomes.
 
@@ -230,8 +230,8 @@ Outputs are either **final** (always published) or **intermediate** (published o
 ```
 results/
 ├── pipeline_info/                                # Nextflow run reports
-├── checkpoints/pipeline_counts.tsv               # Intermediate: counts at each stage, all species
 └── <species>/
+    ├── checkpoint/pipeline_counts.tsv            # Counts at each pipeline step, in pipeline order
     ├── colour_mapping/
     │   ├── <species>_file_colours_input.txt       # Assembly paths in index (colour-ID) order
     │   ├── <species>_label_mapping.tsv           # Sample_ID → group, ordered by colour ID
@@ -242,8 +242,9 @@ results/
     │   ├── <group>_marker_index.thm2             # Each group's candidate-marker index
     │   ├── ggcat/{species,groups/<group>}/                   # Intermediate: GGCAT unitigs
     │   ├── sbwt/build/{species,groups/<group>}/              # Intermediate: SBWT index
-    │   ├── sbwt/dump_unitigs/groups/<group>/                 # Intermediate: unitigs dumped from the SBWT index
-    │   └── themisto2/export/species/                         # Intermediate: exported unitigs & colour sets
+    │   ├── sbwt/dump_unitigs/{species,groups/<group>}/       # Intermediate: unitigs dumped from the SBWT index (both strands)
+    │   ├── themisto2/stats/{species,groups/<group>}/         # Intermediate: themisto2 stats output
+    │   └── themisto2/export/{species,groups/<group>}/        # Intermediate: exported unitigs & colour sets
     ├── candidate_marker_filtering/
     │   ├── <species>_<group>_candidate_unitigs.fasta     # Group-core, group-specific candidates
     │   ├── <species>_<group>_specificity.tsv             # Unitig-level specificity scores
@@ -278,9 +279,9 @@ Paths are relative to `results/<species>/`.
 | `atb_cross_species/<group>/<group>_atb_check_validation.tsv`           | Why each candidate passed or failed the ATB check                                                                                                   |
 | `post_processed_markers/<species>_<group>_markers.fasta`               | `--marker_post_processing`: markers filtered by length/GC and soft-masked (a subset of the final markers)                                           |
 | `primers/<group>/<species>_<group>_primers.tsv`                        | `--primer3_design`: designed primer pairs                                                                                                           |
+| `checkpoint/pipeline_counts.tsv`                                       | Counts at each pipeline step (unitigs, k-mers, lengths, strand duplicates), in pipeline order                                                       |
 | `colour_mapping/<species>_stats.json`                                  | `--publish_intermediate`: genomes written and dropped, groups, and every label change                                                               |
 | `colour_mapping/<species>_dropped_unclassified.tsv`                    | `--publish_intermediate`: unclassified genomes left out of the index, with the reason                                                               |
-| `../checkpoints/pipeline_counts.tsv`                                   | `--publish_intermediate`: counts at each stage, all species                                                                                         |
 
 ### stats.json fields
 
@@ -335,7 +336,7 @@ Run `nextflow run main.nf --help` for the full, always-up-to-date list.
 | `--sample_col`           | string  | `Sample_ID` | Metadata column matched to assembly filenames                                                                                                                                          |
 | `--assembly_suffix`      | string  | `.fasta`    | Suffix appended to `--sample_col` to form the expected filename (directory input only)                                                                                                 |
 | `--outdir`               | path    | `./results` | Output directory                                                                                                                                                                       |
-| `--publish_intermediate` | boolean | `false`     | Also publish intermediates: GGCAT unitigs, SBWT indexes, dumped unitigs and the index export (`<species>/index/…`), the colour-mapping QC files, and per-stage counts (`checkpoints/`) |
+| `--publish_intermediate` | boolean | `false`     | Also publish intermediates: GGCAT unitigs, SBWT indexes, dumped unitigs, the index export and `themisto2 stats` output (`<species>/index/…`), and the colour-mapping QC files |
 
 ### Index building
 
