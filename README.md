@@ -92,7 +92,7 @@ The `--threads 32 64` request (32 CPUs, 64 GB RAM) matches the pipeline's resour
 
 ### Optional: Marker post-processing and primer design
 
-By default, the pipeline stops at the ATB-checked markers FASTA. `--marker_post_processing` filters markers by length/GC% and soft-masks them for downstream assay design (primer3 PCR primers and/or bait-capture tiling); `--primer3_design` then designs primers with primer3. `--primer3_design` requires `--marker_post_processing`; the run stops at launch if it's set on its own.
+By default, the pipeline stops at the ATB-checked markers FASTA. `--marker_post_processing` filters markers by length/GC% and soft-masks them for downstream assay design (primer3 PCR primers and/or bait-capture tiling); `--primer3_design` then designs primers with primer3. `--marker_post_processing` has no default thresholds: set `--marker_min_length`, `--marker_gc_min` and `--marker_gc_max` for your assay, or the run stops at launch. `--primer3_design` requires `--marker_post_processing`; the run stops at launch if it's set on its own.
 
 ```bash
 nextflow run main.nf \
@@ -366,15 +366,15 @@ The defaults point at the ATB species index on the Sanger farm. Off the farm, su
 
 ### Marker post-processing (--marker_post_processing)
 
-| Option                     | Type    | Default                    | Description                                                                                |
-| -------------------------- | ------- | -------------------------- | ------------------------------------------------------------------------------------------ |
-| `--marker_post_processing` | boolean | `false`                    | Filter/mask markers for downstream assay design (primer3 and/or bait capture)              |
-| `--marker_min_length`      | integer | 100                        | Minimum marker length (bp)                                                                 |
-| `--marker_gc_min`          | float   | 35.0                       | Minimum global GC%                                                                         |
-| `--marker_gc_max`          | float   | 60.0                       | Maximum global GC%                                                                         |
-| `--marker_window_size`     | integer | `--colour_index_kmer_size` | Sliding-window size (bp) for local GC check; out-of-range windows soft-masked (lowercased) |
-| `--marker_write_rejected`  | boolean | `true`                     | Write rejected candidates to separate FASTA                                                |
-| `--marker_plot`            | boolean | `true`                     | Generate length/GC diagnostic plot                                                         |
+| Option                     | Type    | Default                       | Description                                                                                |
+| -------------------------- | ------- | ----------------------------- | ------------------------------------------------------------------------------------------ |
+| `--marker_post_processing` | boolean | `false`                       | Filter/mask markers for downstream assay design (primer3 and/or bait capture)              |
+| `--marker_min_length`      | integer | required with post-processing | Minimum marker length (bp)                                                                 |
+| `--marker_gc_min`          | float   | required with post-processing | Minimum global GC%                                                                         |
+| `--marker_gc_max`          | float   | required with post-processing | Maximum global GC%                                                                         |
+| `--marker_window_size`     | integer | `--colour_index_kmer_size`    | Sliding-window size (bp) for local GC check; out-of-range windows soft-masked (lowercased) |
+| `--marker_write_rejected`  | boolean | `true`                        | Write rejected candidates to separate FASTA                                                |
+| `--marker_plot`            | boolean | `true`                        | Generate length/GC diagnostic plot                                                         |
 
 ### Primer design (--primer3_design)
 

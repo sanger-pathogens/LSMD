@@ -61,6 +61,18 @@ workflow {
     if (params.primer3_design && !params.marker_post_processing) {
         exit 1, "ERROR: --primer3_design needs --marker_post_processing (primer3 runs on the post-processed markers)."
     }
+    if (params.marker_post_processing) {
+        // No defaults for the thresholds: the user picks them for their assay. A bare
+        // `--marker_gc_min` (no value) arrives as boolean true, so check for a number.
+        def missing = ['marker_min_length', 'marker_gc_min', 'marker_gc_max'].findAll { !(params[it] instanceof Number) }
+        if (missing) {
+            exit 1, "ERROR: --marker_post_processing needs a numeric value for " +
+                    missing.collect { "--${it}" }.join(', ') + " (no defaults)."
+        }
+        if (params.marker_gc_min >= params.marker_gc_max) {
+            exit 1, "ERROR: --marker_gc_min (${params.marker_gc_min}) must be below --marker_gc_max (${params.marker_gc_max})."
+        }
+    }
     MANIFEST_PARSE(params.manifest)
     samples_ch = MANIFEST_PARSE.out.samples
 
