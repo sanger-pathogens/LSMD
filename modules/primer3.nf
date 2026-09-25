@@ -1,3 +1,4 @@
+// In progress: not included in main.nf yet (--primer3_design stops the run at launch).
 process DESIGN_PRIMERS {
     tag "${meta.ID}"
     label 'cpu_1'

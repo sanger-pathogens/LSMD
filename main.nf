@@ -31,7 +31,9 @@ def printHelp() {
 include { BUILD_COLOUR_INDEX } from './assorted-sub-workflows/themisto2/subworkflows/build_colour_index.nf'
 include { MARKER_FILTERING } from './assorted-sub-workflows/themisto2/subworkflows/marker_filtering.nf'
 include { POST_PROCESS_MARKERS } from './modules/post_processing_markers.nf'
-include { DESIGN_PRIMERS } from './modules/primer3.nf'
+// In progress, not wired in yet: primer design (modules/primer3.nf) and bait design
+// (modules/bait_capture.nf).
+// include { DESIGN_PRIMERS } from './modules/primer3.nf'
 include { CHECKPOINT_FASTA; CHECKPOINT_REPORT } from './assorted-sub-workflows/themisto2/modules/checkpoint.nf'
 include { MANIFEST_PARSE } from './subworkflows/manifest_parse.nf'
 
@@ -58,8 +60,10 @@ workflow {
                 "species / metadata / assemblies / target_groups / atb_exclude_species. " +
                 "See the README's Input section."
     }
-    if (params.primer3_design && !params.marker_post_processing) {
-        exit 1, "ERROR: --primer3_design needs --marker_post_processing (primer3 runs on the post-processed markers)."
+    // Primer design is still in progress (see the commented-out include above): stop
+    // rather than silently ignore the flag.
+    if (params.primer3_design) {
+        exit 1, "ERROR: --primer3_design isn't available yet -- primer design is still in progress."
     }
     if (params.marker_post_processing) {
         // No defaults for the thresholds: the user picks them for their assay. A bare
@@ -97,7 +101,7 @@ workflow {
     // Candidate marker post-processing -- off by default (see
     // --marker_post_processing's help_text). MARKER_FILTERING.out.markers is already one
     // FASTA per species/lineage combo (ATB-checked, or unchecked with a warning -- see
-    // marker_filtering.nf); filter/mask it for downstream assay design (primer3 and/or baits).
+    // marker_filtering.nf); filter/mask it for downstream assay design.
     if (params.marker_post_processing) {
         POST_PROCESS_MARKERS(MARKER_FILTERING.out.markers)
 
@@ -108,14 +112,11 @@ workflow {
         CHECKPOINT_FASTA(postproc_checkpoint_inputs)
         checkpoint_rows = checkpoint_rows.mix(CHECKPOINT_FASTA.out.row)
 
-        // Primer3 design -- off by default, and only meaningful once
-        // POST_PROCESS_MARKERS has actually run (it needs the non_designable
-        // coordinates from that step's FASTA headers). Runs on the passed/filtered
-        // markers only -- rejected markers (too short/global-GC-out-of-range)
-        // are never worth designing primers against.
-        if (params.primer3_design) {
-            DESIGN_PRIMERS(POST_PROCESS_MARKERS.out.filtered)
-        }
+        // Primer design -- in progress, not wired in yet. When it is, it runs on the
+        // passed/filtered markers only (it needs the soft-masking from this step).
+        // if (params.primer3_design) {
+        //     DESIGN_PRIMERS(POST_PROCESS_MARKERS.out.filtered)
+        // }
     }
 
     // Rows sort into pipeline order inside CHECKPOINT_REPORT (see checkpoint_steps() in
@@ -124,5 +125,4 @@ workflow {
     | map { meta, row -> [meta.species ?: meta.ID, row] }
     | groupTuple
     | CHECKPOINT_REPORT
-    // baitcapture tool TODO create in location: /data/pam/team230/sm71/scratch/gps_project/lsmd/modules/
 }

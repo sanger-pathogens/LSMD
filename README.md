@@ -90,9 +90,11 @@ bsub.py --threads 32 64 lsmd_run \
 
 The `--threads 32 64` request (32 CPUs, 64 GB RAM) matches the pipeline's resource requirements.
 
-### Optional: Marker post-processing and primer design
+### Optional: Marker post-processing
 
-By default, the pipeline stops at the ATB-checked markers FASTA. `--marker_post_processing` filters markers by length/GC% and soft-masks them for downstream assay design (primer3 PCR primers and/or bait-capture tiling); `--primer3_design` then designs primers with primer3. `--marker_post_processing` has no default thresholds: set `--marker_min_length`, `--marker_gc_min` and `--marker_gc_max` for your assay, or the run stops at launch. `--primer3_design` requires `--marker_post_processing`; the run stops at launch if it's set on its own.
+By default, the pipeline stops at the ATB-checked markers FASTA. `--marker_post_processing` filters markers by length/GC% and soft-masks them for downstream assay design (PCR primers or bait-capture tiling). It has no default thresholds: set `--marker_min_length`, `--marker_gc_min` and `--marker_gc_max` for your assay, or the run stops at launch.
+
+Primer design (primer3) and bait-capture design (BaitsTools) are in progress and not part of the pipeline yet.
 
 ```bash
 nextflow run main.nf \
@@ -102,13 +104,12 @@ nextflow run main.nf \
   --sample_col Sample_ID \
   --outdir my_output \
   --marker_post_processing \
-  --primer3_design \
   --marker_min_length 100 \
   --marker_gc_min 35.0 \
   --marker_gc_max 60.0
 ```
 
-Filtered/soft-masked markers go to `my_output/<species>/post_processed_markers/`; designed primers to `my_output/<species>/primers/<group>/` (one `_primers.tsv` per group, plus `_no_primers.tsv` listing markers primer3 could not design against).
+Filtered/soft-masked markers go to `my_output/<species>/post_processed_markers/`.
 
 ## Input
 
@@ -256,11 +257,10 @@ results/
     │   ├── <group>_atb_check_validation.tsv      # Per-marker fractions, verdict and reason
     │   ├── <group>_atb_check_summary.txt         # Counts, pass rate, top off-target species
     │   └── <group>_atb_pseudoalign.jsonl         # Raw pseudoalignment against ATB
-    ├── post_processed_markers/                   # With --marker_post_processing
-    │   ├── <species>_<group>_markers.fasta       # Soft-masked (length/GC filtered)
-    │   ├── <species>_<group>_rejected_markers.fasta      # Rejected candidates
-    │   └── <species>_<group>_marker_analysis.png         # Length/GC diagnostic plot
-    └── primers/<group>/                          # With --primer3_design
+    └── post_processed_markers/                   # With --marker_post_processing
+        ├── <species>_<group>_markers.fasta       # Soft-masked (length/GC filtered)
+        ├── <species>_<group>_rejected_markers.fasta      # Rejected candidates
+        └── <species>_<group>_marker_analysis.png         # Length/GC diagnostic plot
 ```
 
 ### Key output files
@@ -278,7 +278,6 @@ Paths are relative to `results/<species>/`.
 | `atb_cross_species/<group>/<group>_atb_check_PASS.fasta`               | **Final markers**: candidates that passed the ATB cross-species check. For a species that isn't in ATB, the candidates go forward unchecked instead |
 | `atb_cross_species/<group>/<group>_atb_check_validation.tsv`           | Why each candidate passed or failed the ATB check                                                                                                   |
 | `post_processed_markers/<species>_<group>_markers.fasta`               | `--marker_post_processing`: markers filtered by length/GC and soft-masked (a subset of the final markers)                                           |
-| `primers/<group>/<species>_<group>_primers.tsv`                        | `--primer3_design`: designed primer pairs                                                                                                           |
 | `checkpoint/pipeline_counts.tsv`                                       | Counts at each pipeline step (unitigs, k-mers, lengths, strand duplicates), in pipeline order                                                       |
 | `colour_mapping/<species>_stats.json`                                  | `--publish_intermediate`: genomes written and dropped, groups, and every label change                                                               |
 | `colour_mapping/<species>_dropped_unclassified.tsv`                    | `--publish_intermediate`: unclassified genomes left out of the index, with the reason                                                               |
@@ -311,7 +310,6 @@ Paths are relative to `results/<species>/`.
 3. **Rebuild candidate index**: rebuild each group's filtered k-mers into its own SBWT/Themisto2 index (a QC gate), then dump it back to candidate unitigs
 4. **ATB cross-species check**: pseudoalign the candidates against the AllTheBacteria species index (`--atb_index`) and keep only markers found in ≥ `--atb_min_within` of the target species' k-mers and ≤ `--atb_max_outside` of any other ATB species → final markers. Species that aren't in ATB skip this step with a warning, and their candidates go forward unchecked
 5. **POST_PROCESS_MARKERS** (opt-in, `--marker_post_processing`): filter on length and global GC%; soft-mask (lowercase) local windows outside the GC range
-6. **DESIGN_PRIMERS** (opt-in, `--primer3_design`): run primer3 on the soft-masked markers
 
 ### Key concepts
 
@@ -369,21 +367,13 @@ The defaults point at the ATB species index on the Sanger farm. Off the farm, su
 
 | Option                     | Type    | Default                       | Description                                                                                |
 | -------------------------- | ------- | ----------------------------- | ------------------------------------------------------------------------------------------ |
-| `--marker_post_processing` | boolean | `false`                       | Filter/mask markers for downstream assay design (primer3 and/or bait capture)              |
+| `--marker_post_processing` | boolean | `false`                       | Filter/mask markers for downstream assay design (PCR primers or bait capture)              |
 | `--marker_min_length`      | integer | required with post-processing | Minimum marker length (bp)                                                                 |
 | `--marker_gc_min`          | float   | required with post-processing | Minimum global GC%                                                                         |
 | `--marker_gc_max`          | float   | required with post-processing | Maximum global GC%                                                                         |
 | `--marker_window_size`     | integer | `--colour_index_kmer_size`    | Sliding-window size (bp) for local GC check; out-of-range windows soft-masked (lowercased) |
 | `--marker_write_rejected`  | boolean | `true`                        | Write rejected candidates to separate FASTA                                                |
 | `--marker_plot`            | boolean | `true`                        | Generate length/GC diagnostic plot                                                         |
-
-### Primer design (--primer3_design)
-
-Requires `--marker_post_processing`; the run stops at launch if it's set on its own.
-
-| Option             | Type    | Default | Description                             |
-| ------------------ | ------- | ------- | --------------------------------------- |
-| `--primer3_design` | boolean | `false` | Run primer3_core on soft-masked markers |
 
 ## Troubleshooting
 
@@ -429,7 +419,6 @@ Try one of:
 | pandas             | 2.2.1                       | `quay.io/sangerpathogens/pandas:2.2.1`                  | colour mapping, group-specificity filter, ATB check                         |
 | python_graphics    | 1.1.7                       | `quay.io/sangerpathogens/python_graphics:1.1.7`         | marker post-processing (Biopython, matplotlib)                              |
 | seqkit             | 2.10.0                      | `quay.io/biocontainers/seqkit:2.10.0--h9ee0642_0`       | per-stage count checkpoints                                                 |
-| primer3            | 2.6.1                       | `quay.io/biocontainers/primer3:2.6.1--pl5321h503566f_7` | primer design                                                               |
 
 All software dependencies are containerised (Docker/Singularity).
 

@@ -28,7 +28,7 @@
     "Candidate marker post-processing (post_processing_markers.nf)": {
       "marker_post_processing": {
         "default": "false",
-        "help_text": "Filter and soft-mask G (final candidate markers) for downstream assay design -- primer3 PCR primers and/or bait-capture tiling. Off by default -- the pipeline stops at the ATB-checked markers FASTA unless this is turned on. When on, --marker_min_length, --marker_gc_min and --marker_gc_max must all be set (no defaults); the run stops at launch otherwise."
+        "help_text": "Filter and soft-mask G (final candidate markers) for downstream assay design (PCR primers or bait-capture tiling). Off by default -- the pipeline stops at the ATB-checked markers FASTA unless this is turned on. When on, --marker_min_length, --marker_gc_min and --marker_gc_max must all be set (no defaults); the run stops at launch otherwise."
       },
       "marker_min_length": {
         "default": "none (required with --marker_post_processing)",
@@ -44,7 +44,7 @@
       },
       "marker_window_size": {
         "default": "same as --colour_index_kmer_size",
-        "help_text": "Local sliding-window size (bp) for the non-designable-region GC check. Windows outside marker_gc_min-marker_gc_max are soft-masked (lowercased) in the output FASTA, not rejected -- primer3 runs with PRIMER_LOWERCASE_MASKING=1 so a primer's 3' end can't sit on a masked base but the rest of the candidate stays usable. Defaults to colour_index_kmer_size (k-mer resolution)."
+        "help_text": "Local sliding-window size (bp) for the non-designable-region GC check. Windows outside marker_gc_min-marker_gc_max are soft-masked (lowercased) in the output FASTA, not rejected -- a primer designer run with lowercase masking (e.g. primer3's PRIMER_LOWERCASE_MASKING=1) keeps a primer's 3' end off masked bases while the rest of the candidate stays usable. Defaults to colour_index_kmer_size (k-mer resolution)."
       },
       "marker_write_rejected": {
         "default": "true",
