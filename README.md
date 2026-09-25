@@ -362,7 +362,7 @@ The defaults point at the ATB species index on the Sanger farm. Off the farm, su
 | `--atb_index`        | path  | ATB-species.thm2 (Sanger farm) | Themisto2 index of AllTheBacteria, one colour per species              |
 | `--atb_colour_names` | path  | color_names.txt (Sanger farm)  | Colour ID → ATB species name, matching `--atb_index`                   |
 | `--atb_min_within`   | float | 0.95                           | Minimum fraction of a marker's k-mers found in the target species      |
-| `--atb_max_outside`  | float | `--specificity_max_outside`    | Maximum fraction of a marker's k-mers allowed in any other ATB species |
+| `--atb_max_outside`  | float | `0.05`                         | Maximum fraction of a marker's k-mers allowed in any other ATB species (independent of `--specificity_max_outside`) |
 
 ### Marker post-processing (--marker_post_processing)
 
