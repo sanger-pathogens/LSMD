@@ -46,7 +46,7 @@ Then prepare a manifest and run it: see [Running your own data](#running-your-ow
 
 1. **Prepare your manifest** (manifest.tsv):
 
-| species         | metadata     | assemblies           | target_groups     | atb_exclude_species |
+| species         | metadata     | assemblies           | target_groups     | target_species |
 | --------------- | ------------ | -------------------- | ----------------- | ------------------- |
 | vibrio_cholerae | metadata.csv | /path/to/assemblies/ | Lineage1,Lineage2 |                     |
 
@@ -123,13 +123,13 @@ One row per species. Columns:
 | metadata            | yes      | Path to a CSV file with Sample_ID + grouping column (--group_label); see below                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | assemblies          | yes      | Directory of assembly FASTAs, or a .txt file listing one assembly path per line                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | target_groups       | no       | Comma-separated `--group_label` values to discover markers for (e.g. `GPSC1,GPSC2`). Blank = every group with ≥ `--candidate_min_genome_count` genomes. See the note below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| atb_exclude_species | no       | Comma-separated ATB colour name(s) left out of the ATB check's "absent from every other species" (`atb_max_outside`) test for this species, e.g. close relatives ATB can't reliably tell apart from your target. `unknown` (ATB's catch-all bucket for unassigned/low-confidence genomes) is **always** excluded; anything listed here is added on top                                                                                                                                                                                                                                                                                                                                                                                               |
+| target_species | no       | Comma-separated ATB colour name(s) left out of the ATB check's "absent from every other species" (`atb_max_outside`) test for this species, e.g. close relatives ATB can't reliably tell apart from your target. `unknown` (ATB's catch-all bucket for unassigned/low-confidence genomes) is **always** excluded; anything listed here is added on top                                                                                                                                                                                                                                                                                                                                                                                               |
 
 The manifest must be tab-separated with exactly these five header columns (any order). A `.csv` file, a comma-separated header, or a missing or unrecognised column stops the run before any jobs start.
 
 **Example:**
 
-| species                  | metadata     | assemblies          | target_groups     | atb_exclude_species |
+| species                  | metadata     | assemblies          | target_groups     | target_species |
 | ------------------------ | ------------ | ------------------- | ----------------- | ------------------- |
 | streptococcus_pneumoniae | metadata.csv | /data/s_pneumoniae/ | GPSC1,GPSC2,GPSC3 |                     |
 | vibrio_cholerae          | metadata.csv | /data/v_cholerae/   | 7PET              |                     |
@@ -386,7 +386,7 @@ Try one of:
 - **Check where they were lost:** `candidate_marker_filtering/<species>_<group>_stats.txt` for group-specificity filtering, and `atb_cross_species/<group>/<group>_atb_check_summary.txt` for the ATB check
 - **Relax the within-group cutoff:** `--candidate_min_freq relaxed` (≥0.5 instead of ≥0.95)
 - **Increase other-group tolerance:** `--specificity_max_outside 0.1` (allow up to 10% presence in other groups)
-- **If most candidates are `FLAG` in the ATB check:** look at the top off-target species in the summary. A close relative ATB can't tell apart from your species can be listed in `atb_exclude_species`
+- **If most candidates are `FLAG` in the ATB check:** look at the top off-target species in the summary. A close relative ATB can't tell apart from your species can be listed in `target_species`
 
 ### Q: A group I expected is missing, or there's a group I didn't expect
 

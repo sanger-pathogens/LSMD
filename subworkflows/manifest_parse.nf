@@ -16,7 +16,7 @@
 //   target_groups       optional, comma-separated lineage labels for that species
 //                       (e.g. "GPSC1,GPSC2"); empty = every lineage with
 //                       >= candidate_min_genome_count genomes (excluding "unclassified")
-//   atb_exclude_species optional, comma-separated ATB colour name(s) dropped from the
+//   target_species optional, comma-separated ATB colour name(s) dropped from the
 //                       ATB check's max-outside side entirely (e.g. close relatives
 //                       ATB can't reliably separate from the target). 'unknown' (ATB's
 //                       catch-all bucket for unassigned/low-confidence genomes) is always
@@ -26,9 +26,9 @@
 //   samples             [ [ID: <species>], <metadata file>, <assemblies path> ]
 //   target_groups       [ [ID: <species>], <target_groups string> ]
 //   atb_target_species  [ [ID: <species>], <species, or '' when it isn't in ATB> ]
-//   atb_exclude_species [ [ID: <species>], <space-separated ATB colour names> ]
+//   target_species [ [ID: <species>], <space-separated ATB colour names> ]
 //
-// target_groups / atb_target_species / atb_exclude_species are kept OUT of meta on purpose: meta rides
+// target_groups / atb_target_species / target_species are kept OUT of meta on purpose: meta rides
 // through every species-wide build process (COLOUR_MAPPING .. THEMISTO2_EXPORT) as
 // part of the task hash, but neither is consumed there -- only marker_filtering.nf
 // consumes them. Carrying either in meta would make an edit to it invalidate the
@@ -36,7 +36,7 @@
 // marker_filtering.nf joins them back in on the slim meta key.
 
 def manifest_columns() {
-    return ['species', 'metadata', 'assemblies', 'target_groups', 'atb_exclude_species']
+    return ['species', 'metadata', 'assemblies', 'target_groups', 'target_species']
 }
 
 // Stop before any rows are read if the manifest isn't a 5-column TSV. splitCsv on a
@@ -142,16 +142,16 @@ def parse_manifest_row(row, atb_names) {
         atb_target_species = ""
     }
 
-    def excluded = (row.atb_exclude_species ?: "").split(',').collect { it.trim() }.findAll { it }
+    def excluded = (row.target_species ?: "").split(',').collect { it.trim() }.findAll { it }
     excluded.findAll { !in_atb(it, atb_names) }.each { name ->
         def suggestions = closest_atb_names(name, atb_names)
-        log.warn("manifest (${species}): atb_exclude_species '${name}' couldn't be found in ${params.atb_colour_names}, "
+        log.warn("manifest (${species}): target_species '${name}' couldn't be found in ${params.atb_colour_names}, "
             + "so it has no effect. Please check the spelling."
             + (suggestions ? " Closest matches: ${suggestions.join(', ')}." : ""))
     }
-    def atb_exclude_species = (['unknown'] + excluded).unique().join(' ')
+    def target_species = (['unknown'] + excluded).unique().join(' ')
 
-    return [[ID: species], metadata, assemblies, target_groups, atb_target_species, atb_exclude_species]
+    return [[ID: species], metadata, assemblies, target_groups, atb_target_species, target_species]
 }
 
 workflow MANIFEST_PARSE {
@@ -170,7 +170,7 @@ workflow MANIFEST_PARSE {
             samples:             [meta, metadata, assemblies]
             target_groups:       [meta, tg]
             atb_target_species:  [meta, atb_tgt]
-            atb_exclude_species: [meta, atb_excl]
+            target_species: [meta, atb_excl]
           }
         | set { parsed }
 
@@ -178,5 +178,5 @@ workflow MANIFEST_PARSE {
     samples             = parsed.samples             // [ [ID], metadata, assemblies ]
     target_groups       = parsed.target_groups       // [ [ID], target_groups string ]
     atb_target_species  = parsed.atb_target_species  // [ [ID], species, or '' when not in ATB ]
-    atb_exclude_species = parsed.atb_exclude_species // [ [ID], space-separated ATB colour names ]
+    target_species = parsed.target_species // [ [ID], space-separated ATB colour names ]
 }
