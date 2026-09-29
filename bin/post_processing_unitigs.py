@@ -18,12 +18,15 @@ Use package SeqUtils to calculate GC%
 """
 
 import argparse
+import statistics
 import sys
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from Bio import SeqIO
+from Bio.Seq import Seq
 from Bio.SeqUtils import gc_fraction
 
 
@@ -102,13 +105,43 @@ def soft_mask(seq: str, regions: List[Tuple[int, int]]) -> str:
     return "".join(chars)
 
 
+def dedupe_strand_pairs(records: List) -> Tuple[List, Dict[str, List[str]]]:
+    """Collapse forward/reverse-complement duplicate records to one per locus.
+
+    A de Bruijn graph is inherently double-stranded, and some dump tools (e.g.
+    `sbwt dump-unitigs` -- see PAT-3592) report both strand-walks of the same
+    unitig as separate records, not independent markers. Keep one
+    representative per canonical sequence (whichever orientation sorts
+    first); PCR primer design is strand-symmetric anyway (primer3 already
+    searches both strands of whatever template it's given), so nothing is
+    lost by dropping the duplicate -- only redundant downstream computation
+    and doubled marker counts.
+
+    Returns (deduped_records, dup_of) where dup_of maps the kept record's id
+    to the ids of every duplicate collapsed into it (a kept record can have
+    more than one duplicate, e.g. 3+ strand-walks of the same locus).
+    """
+    canonical_seen: Dict[str, str] = {}  # canonical seq -> kept record's id
+    dup_of: Dict[str, List[str]] = defaultdict(list)  # kept record's id -> collapsed duplicates' ids
+    deduped = []
+    for record in records:
+        seq_str = str(record.seq)
+        canonical = min(seq_str, str(Seq(seq_str).reverse_complement()))
+        if canonical in canonical_seen:
+            dup_of[canonical_seen[canonical]].append(record.id)
+            continue
+        canonical_seen[canonical] = record.id
+        deduped.append(record)
+    return deduped, dup_of
+
+
 def filter_unitigs(
     fasta_path: str,
     min_length: int = 100,
     min_gc: float = 35.0,
     max_gc: float = 60.0,
     window_size: int = 31,
-) -> Tuple[List[UnitigResult], List[UnitigResult]]:
+) -> Tuple[List[UnitigResult], List[UnitigResult], int]:
     # Filter unitigs by length and global GC content; soft-mask (don't reject)
     # local sliding-window GC dips as non-designable regions.
 
@@ -117,10 +150,12 @@ def filter_unitigs(
     if window_size > min_length:
         raise ValueError(f"window_size ({window_size}) cannot exceed min_length ({min_length})")
 
+    records, dup_of = dedupe_strand_pairs(list(SeqIO.parse(fasta_path, "fasta")))
+
     passed = []
     rejected = []
 
-    for record in SeqIO.parse(fasta_path, "fasta"):
+    for record in records:
         seq_str = str(record.seq)
         seq_len = len(seq_str)
         gc_pct = calculate_gc(seq_str)
@@ -154,7 +189,7 @@ def filter_unitigs(
     # Ranked by length - longest sequences first then by how far the GC% is from 50%
     passed.sort(key=lambda r: (-r.length, abs(r.gc_pct - 50.0)))
 
-    return passed, rejected
+    return passed, rejected, sum(len(dupes) for dupes in dup_of.values())
 
 
 def write_output(results: List[UnitigResult], output_path: str):
@@ -210,10 +245,13 @@ def plot_results(results: List[UnitigResult], output_path: str, min_gc: float, m
     # Panel 1: Length histogram
     ax = axes[0, 0]
     ax.hist(lengths, bins=20, alpha=0.7, color="steelblue", edgecolor="black")
+    median_len = statistics.median(lengths)
+    ax.axvline(median_len, color="orange", linestyle="--", linewidth=2, label=f"Median: {median_len:.0f} bp")
     ax.set_xlabel("Sequence Length (bp)")
     ax.set_ylabel("Count")
-    ax.set_title("Length Distribution")
+    ax.set_title(f"Length Distribution ({min(lengths)}–{max(lengths)} bp)")
     ax.grid(axis="y", alpha=0.3)
+    ax.legend()
 
     # Panel 2: GC% histogram
     ax = axes[0, 1]
@@ -226,14 +264,31 @@ def plot_results(results: List[UnitigResult], output_path: str, min_gc: float, m
     ax.grid(axis="y", alpha=0.3)
     ax.legend()
 
-    # Panel 3: Ranked scatter (GC% vs length, colored by rank)
+    # Panel 3: length vs GC% -- this is the "final answer" panel (which markers
+    # survived, and are they well-centered in spec), so it gets the same target-
+    # range shading Panel 2 has (was missing here before -- inconsistent) and,
+    # for a small enough marker set to actually read, a direct rank label on
+    # every point instead of a colorbar. A colorbar-by-rank forces a
+    # cross-reference for each point; a direct label doesn't, and at the scale
+    # a final marker panel is usually at (single digits to a few dozen) there's
+    # room to show it. Falls back to the colorbar beyond that so it doesn't
+    # become a pile of overlapping numbers on a big candidate set.
     ax = axes[1, 0]
-    scatter = ax.scatter(gcs, lengths, c=ranks, cmap="viridis", s=100, alpha=0.7, edgecolors="black", linewidth=0.5)
+    ax.axvspan(min_gc, max_gc, alpha=0.15, color="green", zorder=0)
+    DIRECT_LABEL_MAX = 40
+    if len(results) <= DIRECT_LABEL_MAX:
+        ax.scatter(gcs, lengths, s=110, color="#2a78d6", alpha=0.85, edgecolors="black", linewidth=0.6, zorder=2)
+        for rank, gc, length in zip(ranks, gcs, lengths):
+            ax.annotate(str(rank), (gc, length), xytext=(4, 4), textcoords="offset points", fontsize=8, color="#0b0b0b")
+    else:
+        scatter = ax.scatter(
+            gcs, lengths, c=ranks, cmap="viridis", s=80, alpha=0.7, edgecolors="black", linewidth=0.5, zorder=2
+        )
+        cbar = plt.colorbar(scatter, ax=ax)
+        cbar.set_label("Rank")
     ax.set_xlabel("GC Content (%)")
     ax.set_ylabel("Sequence Length (bp)")
-    ax.set_title("Ranked by Length → GC Distance from 50%")
-    cbar = plt.colorbar(scatter, ax=ax)
-    cbar.set_label("Rank")
+    ax.set_title(f"Final markers: length vs GC% (target {min_gc}–{max_gc}%)")
     ax.axvline(50.0, color="orange", linestyle="--", linewidth=1, alpha=0.5)
     ax.grid(alpha=0.3)
 
@@ -304,7 +359,7 @@ def main():
 
     # Filter
     print(f"Filtering {args.input}...", file=sys.stderr)
-    passed, rejected = filter_unitigs(
+    passed, rejected, n_dupes = filter_unitigs(
         args.input,
         min_length=args.min_length,
         min_gc=args.gc_min,
@@ -325,12 +380,17 @@ def main():
     print(f"  Output (passed): {output_path}", file=sys.stderr)
     if args.write_rejected:
         print(f"  Output (rejected): {reject_output_path}", file=sys.stderr)
+    if n_dupes:
+        print(f"  Forward/reverse-complement duplicates collapsed: {n_dupes}", file=sys.stderr)
     print(f"  Passed filters: {len(passed)}", file=sys.stderr)
     print(f"  Rejected: {len(rejected)}", file=sys.stderr)
     if passed:
         lengths = [r.length for r in passed]
         gcs = [r.gc_pct for r in passed]
-        print(f"  Length range: {min(lengths)}–{max(lengths)} bp", file=sys.stderr)
+        print(
+            f"  Length range: {min(lengths)}–{max(lengths)} bp (median {statistics.median(lengths):.0f} bp)",
+            file=sys.stderr,
+        )
         print(f"  GC% range: {min(gcs):.1f}–{max(gcs):.1f}%", file=sys.stderr)
 
     # Plot (if requested)

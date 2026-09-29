@@ -4,19 +4,13 @@
     "Input options": {
       "manifest": {
         "default": "null",
-        "help_text": "Run manifest: a TSV with a header row and one data row per species. Columns: species (used as the output folder name), metadata (path to a .tsv/.csv), assemblies (path to a directory or a .txt list), target_groups (optional, comma-separated lineage labels). When unset, use the single-species --metadata / --assembly_input / --target_groups params instead."
-      },
-      "metadata": {
-        "default": "null",
-        "help_text": "Single-species only (--manifest unset): metadata table (.tsv/.csv) for the species. Must contain the --sample_col and --group_label columns."
-      },
-      "assembly_input": {
-        "default": "null",
-        "help_text": "Single-species only (--manifest unset): a directory of assembly FASTAs, or a .txt file listing one assembly path per line. Which kind it is is detected automatically."
-      },
-      "target_groups": {
-        "default": "null",
-        "help_text": "Single-species only (--manifest unset): comma-separated lineage labels (e.g. GPSC1,GPSC2) to run lineage-specificity candidate filtering (step 07) for, alongside the species-wide index. Unset = species-wide only."
+        "help_text": "Run manifest (required): a tab-separated .tsv with a header row and one data row per species. Exactly these columns: species (the species' ATB colour name, e.g. 'vibrio_cholerae'; used as the output-file prefix and folder name and as the target of the ATB cross-species check -- a species not in --atb_colour_names skips that check with a warning, and its candidate markers pass through unchecked), metadata (path to the metadata table), assemblies (path to a directory of FASTAs or a .txt list of assembly paths -- detected automatically), target_groups (optional, comma-separated --group_label values to discover markers for; blank = every group with >= candidate_min_genome_count genomes, excluding 'unclassified'), atb_exclude_species (optional, comma-separated ATB colour names left out of the ATB check's max-outside test; 'unknown' is always excluded). See the README's Input section."
+      }
+    },
+    "Output options": {
+      "outdir": {
+        "default": "./results",
+        "help_text": "Directory where all results are published (one set per species in the manifest)."
       }
     },
     "Logging options": {
@@ -25,32 +19,38 @@
         "help_text": "Should logs appear in plain ASCII"
       }
     },
-    "Step09 - Candidate marker post-processing (post_processing_markers.nf)": {
-      "primer_post_processing": {
+    "Resource options": {
+      "temp_space": {
+        "default": "10000",
+        "help_text": "Scratch/tmp storage (MB) requested from LSF via 'rusage[tmp=...]' for processes labelled request_temp (GGCAT, SBWT build, Themisto2 build). Raise for background-DB-scale runs."
+      }
+    },
+    "Candidate marker post-processing (post_processing_markers.nf)": {
+      "marker_post_processing": {
         "default": "false",
-        "help_text": "Filter and soft-mask G (final candidate markers) for PCR/primer-design suitability. Off by default -- the pipeline stops at the checked candidate_markers SBWT index/FASTA unless this is turned on."
+        "help_text": "Filter and soft-mask G (final candidate markers) for downstream assay design (PCR primers or bait-capture tiling). Off by default -- the pipeline stops at the ATB-checked markers FASTA unless this is turned on. When on, --marker_min_length, --marker_gc_min and --marker_gc_max must all be set (no defaults); the run stops at launch otherwise."
       },
-      "primer_min_length": {
-        "default": "100",
-        "help_text": "Minimum candidate marker length in bp."
+      "marker_min_length": {
+        "default": "none (required with --marker_post_processing)",
+        "help_text": "Minimum candidate marker length in bp. Required when --marker_post_processing is on; no default."
       },
-      "primer_gc_min": {
-        "default": "35.0",
-        "help_text": "Minimum global GC%% a candidate marker's whole sequence must fall within."
+      "marker_gc_min": {
+        "default": "none (required with --marker_post_processing)",
+        "help_text": "Minimum global GC%% a candidate marker's whole sequence must fall within. Required when --marker_post_processing is on; no default."
       },
-      "primer_gc_max": {
-        "default": "60.0",
-        "help_text": "Maximum global GC%% a candidate marker's whole sequence must fall within."
+      "marker_gc_max": {
+        "default": "none (required with --marker_post_processing)",
+        "help_text": "Maximum global GC%% a candidate marker's whole sequence must fall within. Required when --marker_post_processing is on; no default."
       },
-      "primer_window_size": {
-        "default": "same as --color_index_kmer_size",
-        "help_text": "Local sliding-window size (bp) for the non-designable-region GC check. Windows outside primer_gc_min-primer_gc_max are soft-masked (lowercased) in the output FASTA, not rejected -- primer3 runs with PRIMER_LOWERCASE_MASKING=1 so a primer's 3' end can't sit on a masked base but the rest of the candidate stays usable. Defaults to color_index_kmer_size (k-mer resolution)."
+      "marker_window_size": {
+        "default": "same as --colour_index_kmer_size",
+        "help_text": "Local sliding-window size (bp) for the non-designable-region GC check. Windows outside marker_gc_min-marker_gc_max are soft-masked (lowercased) in the output FASTA, not rejected -- a primer designer run with lowercase masking (e.g. primer3's PRIMER_LOWERCASE_MASKING=1) keeps a primer's 3' end off masked bases while the rest of the candidate stays usable. Defaults to colour_index_kmer_size (k-mer resolution)."
       },
-      "primer_write_rejected": {
+      "marker_write_rejected": {
         "default": "true",
         "help_text": "Write rejected (too-short / global-GC-out-of-range) candidates to their own FASTA."
       },
-      "primer_plot": {
+      "marker_plot": {
         "default": "true",
         "help_text": "Generate the 4-panel length/GC diagnostic plot."
       }

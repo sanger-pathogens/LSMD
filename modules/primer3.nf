@@ -1,3 +1,4 @@
+// In progress: not included in main.nf yet (--primer3_design stops the run at launch).
 process DESIGN_PRIMERS {
     tag "${meta.ID}"
     label 'cpu_1'
@@ -6,7 +7,7 @@ process DESIGN_PRIMERS {
 
     container 'quay.io/biocontainers/primer3:2.6.1--pl5321h503566f_7'
 
-    publishDir mode: 'copy', path: "${params.outdir}/candidate_markers/${meta.ID}/primers/"
+    publishDir mode: 'copy', path: "${params.outdir}/${meta.species}/primers/${meta.ID}/"
 
     input:
     tuple val(meta), path(filtered_fasta)
@@ -16,12 +17,13 @@ process DESIGN_PRIMERS {
     tuple val(meta), path(no_primers_tsv),  emit: no_primers
 
     script:
-    primers_tsv = "${meta.ID}_primers.tsv"
-    no_primers_tsv = "${meta.ID}_no_primers.tsv"
+    def id = "${meta.species}_${meta.ID}"
+    primers_tsv = "${id}_primers.tsv"
+    no_primers_tsv = "${id}_no_primers.tsv"
     """
     ${moduleDir}/../bin/design_primers.py \\
         ${filtered_fasta} \\
-        --label ${meta.ID} \\
+        --label ${id} \\
         --out-dir . \\
         --product-size-range ${params.primer3_product_size_range} \\
         --num-return ${params.primer3_num_return} \\

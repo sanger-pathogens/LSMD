@@ -1,294 +1,428 @@
-# lsmd
+# LSMD: Lineage-Specific Marker Discovery
 
-[![Nextflow](https://img.shields.io/badge/nextflow%20DSL2-%E2%89%A521.04.0-23aa62.svg?labelColor=000000)](https://www.nextflow.io/)
-[![run with docker](https://img.shields.io/badge/run%20with-docker-0db7ed?labelColor=000000&logo=docker)](https://www.docker.com/)
-[![run with singularity](https://img.shields.io/badge/run%20with-singularity-1d355c.svg?labelColor=000000)](https://sylabs.io/docs/)
+## What is this?
+
+LSMD discovers k-mer markers that distinguish a target group (lineage, sublineage, serotype, etc.) from related groups within a species. It combines the accuracy of whole-genome analysis with the speed of k-mer-based approaches — discovering markers in hours rather than weeks.
+
+The pipeline was developed and tested for **lineage-level grouping** (e.g. GPSC for _S. pneumoniae_, 7PET for _V. cholerae_), but is flexible enough to work with any grouping you define in your metadata — serotypes, clades, resistance phenotypes, or any other categorical column. You provide the genome assemblies and define the groupings; the pipeline discovers markers that distinguish your chosen groups.
+
+Throughout this README, **group** means whatever categorical column you point `--group_label` at (GPSC, lineage, serotype, …). "Lineage" is just the most common example.
 
 [[_TOC_]]
 
-## Pipeline overview
+## Why k-mers?
 
-lsmd (**l**ineage-**s**pecific **m**arker **d**iscovery) finds k-mer markers that identify a target lineage within a species -- specific enough that they aren't shared with sibling lineages of the same species, _and_ aren't shared with a much larger external background collection (e.g. AllTheBacteria/ATB). It's species-agnostic, lineage-agnostic and background-db-agnostic: point it at any species' assemblies plus a lineage/grouping column and a background SBWT index.
+K-mer analysis enables LSMD to achieve what older discovery methods cannot:
 
-The pipeline builds a chain of SBWT/Themisto2 indexes and then subtracts them from one another (`sbwt difference`) until what's left is only the k-mers unique to the target lineage. Each intermediate index has a stage name, used as its `emit:` channel name and in `--outdir` filenames/paths:
+- **Alignment-free**: No need to align genomes or call variants — faster and more objective
+- **Annotation-independent**: Works with non-coding sequences; doesn't require gene calls or functional annotation
+- **Unbiased**: Uses all k-mers in the input genomes, not a subset (unlike sketching/sub-sampling approaches)
+- **Highly scalable**: Tested on 40,000+ genomes; computational cost scales with data volume, not complexity
+- **Deployment-ready**: Output k-mers are short, concrete sequences suitable for immediate PCR primer design or bait-capture panel construction
 
-| Stage name        | Meaning                                                                                                   |
-| ----------------- | --------------------------------------------------------------------------------------------------------- |
-| `species_index`   | Species-wide index -- all genomes of the target species, coloured by `--group_label`.                     |
-| `lineage_index`   | Per-lineage index -- the subset of `species_index` for one `--target_groups` lineage.                     |
-| ATB / GTDB        | Background index, built independently from a large external genome collection.                            |
-| `bg_excl`         | `background − species_index` -- background exclusion set (currently ATB only; GTDB not yet wired in).     |
-| `xlin_bg`         | `species_index − lineage_index` -- k-mers found elsewhere in the species but not in this lineage.         |
-| `candidate_index` | Threshold-filtered candidates from `lineage_index` (`core`/`relaxed`/`catchall` presence-fraction modes). |
-| `lin_cand`        | `candidate_index − xlin_bg` -- candidates confirmed specific _within_ the species.                        |
-| `markers`         | `lin_cand − bg_excl` -- final marker set, also confirmed specific against the outside background.         |
+The pipeline uses **SBWT** for compact k-mer indexing and **Themisto2** for colour-mapped k-mer indexes and pseudoalignment.
 
-Concretely, the pipeline runs as these stages (stages 3-4 are opt-in):
+## Quick start
 
-1. **`BUILD_COLOR_INDEX`** ([assorted-sub-workflows/themisto2](assorted-sub-workflows/themisto2)) -- maps metadata + assemblies to a Themisto2 colour file, builds `species_index` and (if `--target_groups` is set) `lineage_index`, then filters and rebuilds `lineage_index` down to `candidate_index`.
-2. **`SET_DIFF_CALCULATIONS`** ([assorted-sub-workflows/themisto2](assorted-sub-workflows/themisto2)) -- computes `bg_excl`, `xlin_bg`, `lin_cand` and `markers` by chaining `sbwt difference` (each diff is immediately re-verified with `sbwt check`, since a corrupted diff has been observed to exit `0`).
-3. **`POST_PROCESS_MARKERS`** ([modules/post_processing_markers.nf](modules/post_processing_markers.nf), opt-in via `--primer_post_processing`) -- dumps `markers`' unitigs to FASTA, rejects on length + global GC%, and soft-masks (lowercases) out-of-range local windows so primer3 can avoid them without losing the rest of the fragment.
-4. **`DESIGN_PRIMERS`** ([modules/primer3.nf](modules/primer3.nf), opt-in via `--primer3_design`, needs `--primer_post_processing` too) -- runs `primer3_core` on each soft-masked marker with `PRIMER_LOWERCASE_MASKING=1`.
+**Prerequisites:** Nextflow, Docker or Singularity
 
-> This mirrors the numbered `00`-`09` stage documentation kept alongside the pipeline's working data (outside this repo) -- see that doc set for the full biological rationale and worked examples behind each stage.
+```bash
+git clone --recurse-submodules git@gitlab.internal.sanger.ac.uk:sanger-pathogens/pipelines/lsmd.git
+cd lsmd
+```
 
-### `BUILD_COLOR_INDEX` in detail
+Then prepare a manifest and run it: see [Running your own data](#running-your-own-data).
 
-1. **Colour mapping** (`bin/color_mapping.py` in [assorted-sub-workflows/themisto2](assorted-sub-workflows/themisto2)): matches metadata samples to assembly files on disk and writes Themisto's `--file-colors` input, ordered and grouped by `--group_label`. Always writes a species-wide index (`species_index`); optionally also writes one lineage-scoped index per group named in `--target_groups` (`lineage_index` -- see [Index B](#target-lineages---target_groups-optional) below).
-2. **GGCAT**: builds unitigs from the colour file.
-3. **SBWT**: builds the SBWT index from the unitigs, then verifies it loads correctly (`sbwt check`, split into its own lighter-weight step).
-4. **Themisto2 build**: builds the Themisto2 index from the colour file + verified SBWT index, then sanity-checks it loads (`themisto2 stats`).
-5. **Themisto2 export**: exports the index to `export.unitigs.fa`, `export.color_sets.txt` and `export.metadata.txt`.
+## Running your own data
 
-Steps 2-5 run for both `species_index` and `lineage_index` (when `--target_groups` is set) as two separate parallel pipelines -- same steps, same processes, just aliased (`*_SPECIES` / `*_GROUP`) so each can be invoked once per Nextflow workflow scope.
+### Prerequisites
 
-6. **Candidate filtering** (`bin/core_catchall_filter.py`, per lineage, only when `--target_groups` is set): filters that lineage's own Step 5 export down to a candidate marker unitig FASTA using `--candidate_min_freq`/`--candidate_min_genome_count`. This is Python-derived, not yet a real index.
-7. **Candidate index rebuild**: the filtered FASTA is rebuilt through GGCAT -> SBWT build/check (a real index, `candidate_index`) -> Themisto2 build/stats (QC gate only -- confirms the rebuild is structurally sound, no export, since nothing downstream reads it). If nothing survives filtering, the FASTA is empty and this rebuild is skipped for that lineage (logged via `log.warn`).
+- Nextflow ≥ 21.04.0
+- Docker or Singularity
+- A manifest TSV (one row per species; see [Input](#input))
+- Assembly FASTA files + a metadata CSV with Sample_ID and grouping column (e.g. Lineage, GPSC)
 
-### Current development status
+### Steps
 
-This pipeline is still early in development (see open TODOs in [main.nf](main.nf) and the sub-workflows):
+1. **Prepare your manifest** (manifest.tsv):
 
-- **Single run per invocation.** `--metadata`/`--assembly_input` only support one species/lineage-set per run; multi-species support (a samplesheet of `species_id, metadata, assembly, target_groups` rows) is planned but not yet implemented.
-- **`--target_groups` is a single global list**, not per-species -- fine for one species per run, but will need to move onto that future samplesheet.
-- **Step 10 is partial.** [modules/post_processing_markers.nf](modules/post_processing_markers.nf) (`--primer_post_processing`) and [modules/primer3.nf](modules/primer3.nf) (`--primer3_design`) are wired into `main.nf`; [modules/bait_capture.nf](modules/bait_capture.nf) is still an unfilled template.
-- **GTDB-based background exclusion isn't implemented** -- only the ATB-based `bg_excl`/`markers` path currently runs.
-- A couple of diagnostic scripts (`bin/plot_specificity.py`, `bin/validation_classify_gpsc.py`) exist but aren't yet wired into a module/subworkflow.
+| species         | metadata     | assemblies           | target_groups     | atb_exclude_species |
+| --------------- | ------------ | -------------------- | ----------------- | ------------------- |
+| vibrio_cholerae | metadata.csv | /path/to/assemblies/ | Lineage1,Lineage2 |                     |
 
-## Usage
+2. **Prepare your metadata table** (metadata.csv):
 
-### Quickstart
+| Sample_ID | Lineage  | other_columns |
+| --------- | -------- | ------------- |
+| sample_1  | Lineage1 | data...       |
+| sample_2  | Lineage1 | data...       |
+| sample_3  | Lineage2 | data...       |
 
-#### From source code
-
-1. Clone this repository (including submodules):
-
-   ```bash
-   git clone --recurse-submodules git@gitlab.internal.sanger.ac.uk:sanger-pathogens/pipelines/lsmd.git
-   cd lsmd
-   ```
-
-2. Run with `-profile sanger_local` on the Sanger farm (uses Singularity; also raises `max_cpus`/`max_memory` so per-process `cpu_*`/`mem_*` labels -- e.g. GGCAT/Themisto2's `cpu_32`/`mem_64` -- aren't silently clipped under local execution):
+3. **Run the pipeline:**
 
    ```bash
    nextflow run main.nf \
-       -profile sanger_local \
-       --metadata metadata.csv \
-       --assembly_input assemblies/ \
-       --assembly_suffix .fasta.gz \
-       --group_label Lineage \
-       --sample_col name \
-       --outdir my_output
+     -profile sanger_local \
+     --manifest manifest.tsv \
+     --assembly_suffix .fasta.gz \
+     --group_label Lineage \
+     --sample_col Sample_ID \
+     --outdir my_output
    ```
 
-   `docker`/`singularity` profiles are also available (inherited from [nextflow-commons](https://github.com/sanger-pathogens/nextflow-commons)).
-   :warning: If no profile is specified the pipeline runs with a Sanger HPC-specific configuration, including use of temp storage (`--temp_space`). Configure appropriately for other systems.
+4. **Inspect results** in `my_output/` (see [Output](#output) for file descriptions).
 
-3. A bundled `test` profile runs a small (11-genome) _V. tarriae_ dataset, exercising the `--target_groups` code path:
+### On the Sanger farm (LSF)
 
-   ```bash
-   nextflow run main.nf -profile test,sanger_local --outdir test_output
-   ```
-
-4. Once the run has finished and you've inspected the output, clean up intermediate files (keep `work/`/`.nextflow.log` until you're satisfied outputs are correct):
-
-   ```bash
-   rm -rf work .nextflow*
-   ```
-
-#### Using on the Sanger farm
-
-First load the pipeline module:
-
-```bash
-module load lsmd
-```
-
-Then run on the command line with `lsmd <options>`:
-
-```bash
-lsmd --help
-```
-
-Submit to LSF using this team's `bsub.py` wrapper (not raw `bsub`) -- sizing here (32 threads, 64GB) matches `-profile sanger_local`'s `max_cpus`/`max_memory`, per the comment in [nextflow.config](nextflow.config#L86):
+Load the module and use `bsub.py` to submit:
 
 ```bash
 module load lsmd bsub.py
 
 bsub.py --threads 32 64 lsmd_run \
-    "lsmd -profile sanger_local \
-        --metadata metadata.csv \
-        --assembly_input assemblies/ \
-        --assembly_suffix .fasta.gz \
-        --group_label Lineage \
-        --sample_col name \
-        --outdir my_output"
+  "lsmd -profile sanger_local \
+    --manifest manifest.tsv \
+    --assembly_suffix .fasta.gz \
+    --group_label Lineage \
+    --sample_col Sample_ID \
+    --outdir my_output"
 ```
 
-Not using `-profile sanger_local`? Then the pipeline submits one LSF job per process itself (via the inherited `standard` profile), so the outer job just needs to stay alive to do that submitting -- a much smaller request (e.g. `bsub.py 4 lsmd_run "lsmd --metadata ... --outdir my_output"`) is enough.
+The `--threads 32 64` request (32 CPUs, 64 GB RAM) matches the pipeline's resource requirements.
 
-### Input
+### Optional: Marker post-processing
 
-#### Metadata (`--metadata`)
+By default, the pipeline stops at the ATB-checked markers FASTA. `--marker_post_processing` filters markers by length/GC% and soft-masks them for downstream assay design (PCR primers or bait-capture tiling). It has no default thresholds: set `--marker_min_length`, `--marker_gc_min` and `--marker_gc_max` for your assay, or the run stops at launch.
 
-A CSV/TSV file with one row per genome assembly, including a sample-identifier column (`--sample_col`, default `Sample_ID`) matched against assembly filenames, and a grouping column (`--group_label`, required) used to colour assemblies into lineages -- e.g. a GPSC column.
+Primer design (primer3) and bait-capture design (BaitsTools) are in progress and not part of the pipeline yet.
 
-#### Assemblies (`--assembly_input`, `--assembly_suffix`)
+```bash
+nextflow run main.nf \
+  -profile sanger_local \
+  --manifest manifest.tsv \
+  --group_label Lineage \
+  --sample_col Sample_ID \
+  --outdir my_output \
+  --marker_post_processing \
+  --marker_min_length 100 \
+  --marker_gc_min 35.0 \
+  --marker_gc_max 60.0
+```
 
-Either a directory of assembly FASTA files, or a `.txt` file listing one assembly path per line -- detected automatically. When a directory, `--assembly_suffix` (default `.contigs.fasta`) is appended to each `--sample_col` value to form the assembly filename.
+Filtered/soft-masked markers go to `my_output/<species>/post_processed_markers/`.
 
-#### Target lineages (`--target_groups`, optional)
+## Input
 
-Comma-separated label(s) from `--group_label`, e.g. `GPSC1,GPSC2`, to build `lineage_index` for -- required for any output past `species_index`, since `SET_DIFF_CALCULATIONS` needs a lineage index to diff against. Leave empty to only build the species-wide index.
+### Manifest TSV (--manifest, required)
 
-`species_index` scales poorly once a species has many groups -- S. pneumoniae alone has 765+ GPSCs. `--target_groups` lets you additionally build colour files scoped to just the lineages you care about, without re-running the whole pipeline per lineage. Setting `--target_groups` does not skip or shrink the species-wide build -- `species_index` is always built regardless; the per-group colour files are fanned out (one Nextflow channel item per lineage) into the same GGCAT -> SBWT -> Themisto2 build/stats/export chain `species_index` uses, then each lineage's own export feeds candidate filtering + rebuild (steps 6-7 above).
+One row per species. Columns:
 
-#### Background index (`--bg_index`, `--bg_excl_index`)
+| Column              | Required | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| species             | yes      | The species' [AllTheBacteria](https://github.com/AllTheBacteria/AllTheBacteria) (ATB) colour name: the full binomial, lowercase, with an underscore, e.g. `streptococcus_pneumoniae` or `vibrio_cholerae`. Used as the output-file prefix (so no whitespace or `/`) and as the target species of the ATB cross-species check. ATB splits some species into lettered chunks (_S. pneumoniae_ into `a`/`b`/`c`/...); give the base name and the chunks are picked up automatically. Check the name with `grep -i '<species>' <atb_colour_names>`. **Not in ATB:** the run still goes ahead, but that species skips the ATB check (its markers go forward unverified) and the log warns at launch, suggesting the closest ATB names in case it's a typo |
+| metadata            | yes      | Path to a CSV file with Sample_ID + grouping column (--group_label); see below                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| assemblies          | yes      | Directory of assembly FASTAs, or a .txt file listing one assembly path per line                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| target_groups       | no       | Comma-separated `--group_label` values to discover markers for (e.g. `GPSC1,GPSC2`). Blank = every group with ≥ `--candidate_min_genome_count` genomes. See the note below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| atb_exclude_species | no       | Comma-separated ATB colour name(s) left out of the ATB check's "absent from every other species" (`atb_max_outside`) test for this species, e.g. close relatives ATB can't reliably tell apart from your target. `unknown` (ATB's catch-all bucket for unassigned/low-confidence genomes) is **always** excluded; anything listed here is added on top                                                                                                                                                                                                                                                                                                                                                                                               |
 
-`--bg_index` (default: a pre-built ATB SBWT index on the Sanger farm) is what `bg_excl`/`markers` are diffed against. If you've already computed `bg_excl` for this species in a previous run, pass it directly via `--bg_excl_index` to skip re-running that hugemem-scale diff. Both must be built at the same `--color_index_kmer_size` as the rest of the pipeline's indexes (default `31`).
+The manifest must be tab-separated with exactly these five header columns (any order). A `.csv` file, a comma-separated header, or a missing or unrecognised column stops the run before any jobs start.
 
-### Output
+**Example:**
 
-Results are written to `--outdir` (default: `./results`). Under `colour_mapping/`, `ggcat/`, `sbwt/` and `themisto2/`, `<ID>` is either the species run's own ID (`species_index`) or a `--target_groups` label like `GPSC1` (`lineage_index` and its `candidate_index` rebuild):
+| species                  | metadata     | assemblies          | target_groups     | atb_exclude_species |
+| ------------------------ | ------------ | ------------------- | ----------------- | ------------------- |
+| streptococcus_pneumoniae | metadata.csv | /data/s_pneumoniae/ | GPSC1,GPSC2,GPSC3 |                     |
+| vibrio_cholerae          | metadata.csv | /data/v_cholerae/   | 7PET              |                     |
+
+Each row is processed independently; one run can build indexes for multiple species.
+
+**About `target_groups`:**
+
+- **Specify groups explicitly** (e.g. `GPSC1,GPSC2,GPSC3`): Candidate markers are discovered only for the listed groups. Use the exact values from your `--group_label` column in the metadata, after [label cleaning](#cleaning-group-labels)
+- **Leave blank**: Candidate markers are discovered for **every** group with ≥ `--candidate_min_genome_count` genomes, after label cleaning. Only the exact label `unclassified` is skipped. Useful for exploring new datasets and discovering markers for all major groups automatically
+- **Catch-all labels are real groups, not targets you want.** A label like `Non-7PET_unclassified` is not `unclassified`: it becomes its own group, and would become a target if `target_groups` were blank. For _V. cholerae_, **7PET is the only target**, so list `7PET` explicitly. `Non-7PET_unclassified` still does useful work as a non-target: it counts as an outside group, so markers that also appear in non-7PET genomes are rejected. It isn't dropped like `unclassified` genomes are
+- For species with many groups (e.g. _S. pneumoniae_ with 765+ GPSCs), specifying groups explicitly is more efficient than discovering markers for all of them
+
+**Note on folder naming:** `<group>` in the output paths is a placeholder for each value in your `--group_label` column. With `--group_label GPSC` you get `streptococcus_pneumoniae/candidate_marker_filtering/streptococcus_pneumoniae_GPSC1_…`, `streptococcus_pneumoniae/atb_cross_species/GPSC1/`, …; with `--group_label Lineage` and species `vibrio_cholerae` you get `vibrio_cholerae/atb_cross_species/7PET/`.
+
+### Metadata table (per-species)
+
+A CSV (comma-separated) file with one row per genome assembly. Required columns:
+
+| Column                              | Meaning                                                                                                                          |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| --sample_col (default: `Sample_ID`) | Genome identifier, matched against assembly filenames after normalisation (e.g. metadata `VC_O1_8` matches file `VC_O1_8.fasta`) |
+| --group_label (required)            | The column whose values become the groups (e.g. `GPSC`, `Lineage`, `sublineage`)                                                 |
+
+**Example:**
+
+| Sample_ID | GPSC  | Country | Resistance |
+| --------- | ----- | ------- | ---------- |
+| sample_1  | GPSC1 | UK      | sensitive  |
+| sample_2  | GPSC1 | USA     | resistant  |
+| sample_3  | GPSC2 | UK      | sensitive  |
+| sample_4  | NA    | UK      | sensitive  |
+
+Sample 4's GPSC is a missing value, so it's labelled `unclassified` and left out of the index (see [Unclassified genomes](#unclassified-genomes)).
+
+### Cleaning group labels
+
+Group labels become colour groups. Messy labels create fake groups: `1215;5` would become its own group instead of GPSC5, and would then reject GPSC5's own markers as an "outside group". Labels are cleaned **before** the index is built, so every later step (targets, genome-count thresholds, specificity filtering) uses the cleaned labels. There's nothing to configure: the rules are fixed.
+
+Metadata is read as plain text: `3` stays `3`, not `3.0`. Headers, sample IDs and labels are trimmed of surrounding spaces.
+
+Each label goes through these rules **in order**:
+
+| Order | Rule            | What it does                                                                                                                                                                                                                                                                                                                                     |
+| ----- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1     | Missing values  | Blank labels and the missing values below become `unclassified`                                                                                                                                                                                                                                                                                  |
+| 2     | GPSC `;` labels | Only when `--group_label` is `GPSC` (any case). A merge-history label becomes its smallest number, keeping its `GPSC` prefix if it has one: `1215;5` → `5`, `GPSC3;28` → `GPSC3`. **Exception:** 235 with 9 in any order or prefix form (`235;9`, `9;235`, `GPSC235;9`, `GPSC9;235`) becomes its own group `235_9` (`GPSC235_9` with the prefix) |
+
+For any other `--group_label`, labels containing `;` are left as written.
+
+**Missing values** (matched case-insensitively):
+
+`""` `NA` `N/A` `#N/A` `NaN` `null` `none` `unknown` `missing` `-` `?` `.` `not applicable` `not available` `not collected` `not provided`
+
+**The colour-mapping step stops if** `--group_label` is `GPSC` and a `;` label has a part that isn't a whole number (e.g. `5;abc`). All bad labels are listed; fix them in the metadata.
+
+**Checking the result:** every changed label is printed in the colour-mapping log and, with `--publish_intermediate`, listed in `<species>/colour_mapping/<species>_stats.json` under `label_changes` (raw label, new label, genome count, and which rule changed it: `missing_value` or `gpsc_multi`).
+
+### Unclassified genomes
+
+A genome ends up `unclassified` when:
+
+- its label is blank or a missing value
+- its metadata label already reads `unclassified` (any case)
+- its assembly file has no metadata row (Sample_ID taken from the filename)
+
+Unclassified genomes are **always left out of the index**. With `--publish_intermediate`, they're listed in `<species>/colour_mapping/<species>_dropped_unclassified.tsv` with the reason (`missing_value`, `labelled_unclassified` or `no_metadata_row`). The colour-mapping step stops if no genomes are left.
+
+**Markers are not checked against unclassified genomes.** There's no evidence that markers are absent from them. For _S. pneumoniae_ this includes GPS novel clusters (`NA`), which are real non-targets. Classify unknown genomes where possible, and validate markers against near-neighbours (e.g. with BLAST) as a backstop.
+
+**Also left out:** metadata rows whose assembly FASTA can't be found, and non-existent paths in a `.txt` assembly list.
+
+### Worked examples
+
+**_S. pneumoniae_ (GPSC).** Per the [GPS notes](https://www.pneumogen.net/gps/assigningGPSCs.html), a label like `1215;5` is a **merge history**: the canonical GPSC is the smaller number. `235;9` is the exception, a mixture rather than a merge. `NA` is a **novel cluster** with no GPSC yet. With `--group_label GPSC`:
+
+- `1215;5` → `5` and `1250;156` → `156`
+- `235;9` → `235_9`, its own group (it isn't in the current GPS metadata, but is handled if it appears)
+- `NA` → `unclassified`, dropped from the index, so markers aren't checked against novel clusters
+
+**_V. cholerae_ (7PET).** 7PET is the only target, so set `target_groups` to `7PET`. Every other lineage, including `Non-7PET_unclassified`, is an outside group that markers are checked against. Genomes with no metadata row are of unknown lineage and may be 7PET, so they're dropped rather than rejecting 7PET markers.
+
+### Run-wide parameters
+
+These apply to all species in the manifest:
+
+- `--sample_col` (default: `Sample_ID`): metadata column matched to filenames
+- `--group_label` (required): metadata column whose values become the groups
+- `--assembly_suffix` (default: `.fasta`): suffix appended to `--sample_col` to form the expected filename (directory input only)
+
+## Output
+
+Results are written to `--outdir` (default: `./results`), in one folder per species, named from the manifest's `species` column (e.g. `results/vibrio_cholerae/`). Only `pipeline_info/` (Nextflow's run reports) is run-wide.
+
+Outputs are either **final** (always published) or **intermediate** (published only with `--publish_intermediate`). Intermediates can be large: the species index export alone was ~250 GB for ~42k _S. pneumoniae_ genomes.
+
+### Directory structure
 
 ```
 results/
-├── colour_mapping/<ID>/
-│   ├── index_species/
-│   └── index_target_group/<group>/
-├── ggcat/<ID>/
-├── sbwt/
-│   ├── <ID>/
-│   │   └── candidate/<lineage>/
-│   └── <stage>/<ID>/
-├── themisto2/<ID>/
-│   ├── build/
-│   └── export/
-├── candidate_filter/<lineage>/
-└── candidate_markers/markers_<species>_<lineage>/
+├── pipeline_info/                                # Nextflow run reports
+└── <species>/
+    ├── checkpoint/pipeline_counts.tsv            # Counts at each pipeline step, in pipeline order
+    ├── colour_mapping/
+    │   ├── <species>_file_colours_input.txt       # Assembly paths in index (colour-ID) order
+    │   ├── <species>_label_mapping.tsv           # Sample_ID → group, ordered by colour ID
+    │   ├── <species>_stats.json                  # Intermediate: genome counts + label cleaning
+    │   └── <species>_dropped_unclassified.tsv    # Intermediate: unclassified genomes left out
+    ├── index/
+    │   ├── species_index.thm2                    # Species-wide Themisto2 colour index
+    │   ├── <group>_marker_index.thm2             # Each group's candidate-marker index
+    │   ├── ggcat/{species,groups/<group>}/                   # Intermediate: GGCAT unitigs
+    │   ├── sbwt/build/{species,groups/<group>}/              # Intermediate: SBWT index
+    │   ├── sbwt/dump_unitigs/{species,groups/<group>}/       # Intermediate: unitigs dumped from the SBWT index (both strands)
+    │   ├── themisto2/stats/{species,groups/<group>}/         # Intermediate: themisto2 stats output
+    │   └── themisto2/export/{species,groups/<group>}/        # Intermediate: exported unitigs & colour sets
+    ├── candidate_marker_filtering/
+    │   ├── <species>_<group>_candidate_unitigs.fasta     # Group-core, group-specific candidates
+    │   ├── <species>_<group>_specificity.tsv             # Unitig-level specificity scores
+    │   └── <species>_<group>_stats.txt                   # Group-level filtering stats
+    ├── atb_cross_species/<group>/
+    │   ├── <group>_atb_check_PASS.fasta          # Final markers (passed the ATB check)
+    │   ├── <group>_atb_check_FLAG.fasta          # Also found in another ATB species (dropped)
+    │   ├── <group>_atb_check_ABSENT.fasta        # Not found in the target species at all (dropped)
+    │   ├── <group>_atb_check_validation.tsv      # Per-marker fractions, verdict and reason
+    │   ├── <group>_atb_check_summary.txt         # Counts, pass rate, top off-target species
+    │   └── <group>_atb_pseudoalign.jsonl         # Raw pseudoalignment against ATB
+    └── post_processed_markers/                   # With --marker_post_processing
+        ├── <species>_<group>_markers.fasta       # Soft-masked (length/GC filtered)
+        ├── <species>_<group>_rejected_markers.fasta      # Rejected candidates
+        └── <species>_<group>_marker_analysis.png         # Length/GC diagnostic plot
 ```
 
-| Path                                              | Contents                                                                                              |
-| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `colour_mapping/<ID>/index_species/`              | `species_file_colors_input.txt`, `species_label_mapping.tsv`, `species_stats.json`                    |
-| `colour_mapping/<ID>/index_target_group/<group>/` | Same three files, scoped to one `--target_groups` label -- only present when `--target_groups` is set |
-| `ggcat/<ID>/`                                     | Unitigs FASTA built from the colour file                                                              |
-| `sbwt/<ID>/`                                      | SBWT index + LCS array for `species_index`/`lineage_index`                                            |
-| `sbwt/<ID>/candidate/<lineage>/`                  | SBWT index + LCS array for the `candidate_index` rebuild                                              |
-| `sbwt/<stage>/<ID>/`                              | Checked set-difference indexes -- `<stage>` is `bg_excl`, `xlin_bg` or `lin_cand`                     |
-| `themisto2/<ID>/build/`                           | `index.thm2`                                                                                          |
-| `themisto2/<ID>/export/`                          | `export.unitigs.fa`, `export.color_sets.txt` (optionally gzipped), `export.metadata.txt`              |
-| `candidate_filter/<lineage>/`                     | `{lineage}_{min_freq_label}_candidate_unitigs.fasta` + `_stats.txt` -- `candidate_index`, pre-rebuild |
-| `candidate_markers/markers_<species>_<lineage>/`  | Final `markers` outputs -- see below                                                                  |
+### Key output files
 
-`<ID>` is either the species run's own ID (`species_index`) or a `--target_groups` label like `GPSC1` (`lineage_index` and its `candidate_index` rebuild).
+Paths are relative to `results/<species>/`.
 
-**`candidate_markers/markers_<species>_<lineage>/` contents:**
+| File                                                                   | Description                                                                                                                                         |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `colour_mapping/<species>_file_colours_input.txt`                      | Every assembly in the index, in colour-ID order                                                                                                     |
+| `colour_mapping/<species>_label_mapping.tsv`                           | Sample_ID → group for each colour ID                                                                                                                |
+| `index/species_index.thm2`                                             | The species-wide Themisto2 colour index                                                                                                             |
+| `index/<group>_marker_index.thm2`                                      | The Themisto2 index of a group's candidate markers                                                                                                  |
+| `candidate_marker_filtering/<species>_<group>_candidate_unitigs.fasta` | Candidate markers after group-specificity filtering, before the ATB check                                                                           |
+| `candidate_marker_filtering/<species>_<group>_specificity.tsv`         | Per-unitig within-group / max-outside-group presence (diagnostic)                                                                                   |
+| `atb_cross_species/<group>/<group>_atb_check_PASS.fasta`               | **Final markers**: candidates that passed the ATB cross-species check. For a species that isn't in ATB, the candidates go forward unchecked instead |
+| `atb_cross_species/<group>/<group>_atb_check_validation.tsv`           | Why each candidate passed or failed the ATB check                                                                                                   |
+| `post_processed_markers/<species>_<group>_markers.fasta`               | `--marker_post_processing`: markers filtered by length/GC and soft-masked (a subset of the final markers)                                           |
+| `checkpoint/pipeline_counts.tsv`                                       | Counts at each pipeline step (unitigs, k-mers, lengths, strand duplicates), in pipeline order                                                       |
+| `colour_mapping/<species>_stats.json`                                  | `--publish_intermediate`: genomes written and dropped, groups, and every label change                                                               |
+| `colour_mapping/<species>_dropped_unclassified.tsv`                    | `--publish_intermediate`: unclassified genomes left out of the index, with the reason                                                               |
 
-| File                                        | Written when                                             |
-| ------------------------------------------- | -------------------------------------------------------- |
-| `markers_<species>_<lineage>.sbwt`          | Always -- checked `markers` SBWT index                   |
-| `markers_<species>_<lineage>_unitigs.fasta` | Always -- `markers` dumped to FASTA                      |
-| `<lineage>_filtered_markers.fasta`          | `--primer_post_processing` (soft-masked)                 |
-| `<lineage>_rejected_markers.fasta`          | `--primer_post_processing` and `--primer_write_rejected` |
-| `<lineage>_marker_analysis.png`             | `--primer_post_processing` and `--primer_plot`           |
-| `primers/<meta.ID>_primers.tsv`             | `--primer3_design`                                       |
-| `primers/<meta.ID>_no_primers.tsv`          | `--primer3_design`                                       |
+### stats.json fields
 
-#### `stats.json` fields
+`<species>/colour_mapping/<species>_stats.json` (published with `--publish_intermediate`) summarises how metadata and assemblies were matched up, then how labels were cleaned:
 
-Every `index_species/` and `index_target_group/<group>/` directory (under `colour_mapping/<ID>/`) gets its own `stats.json`. Some fields only make sense at species-wide scope -- a sample with no label, or an assembly with no metadata row at all, can't be attributed to one specific group, so those fields are simply omitted (not reported as `0`) from per-group `stats.json` files.
+| Field                                | Meaning                                                                                                              |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `species`                            | Species name (the manifest `species` value)                                                                          |
+| `group_label_column`                 | The `--group_label` column used                                                                                      |
+| `assemblies_total`                   | `assemblies_written` + `assemblies_dropped_fasta_not_found` + `assemblies_dropped_unclassified`                      |
+| `assemblies_written`                 | Genomes included in the index (one colour per line in the colour file)                                               |
+| `assemblies_dropped_fasta_not_found` | Metadata rows whose expected assembly FASTA wasn't found on disk                                                     |
+| `assemblies_dropped_unclassified`    | Unclassified genomes left out of the index (listed in `_dropped_unclassified.tsv`)                                   |
+| `assembly_paths_missing_file`        | Entries in a `.txt` assembly path-list that don't exist on disk                                                      |
+| `relabelled_unclassified`            | Metadata rows whose final label is `unclassified` because it was blank or a missing value                            |
+| `assemblies_without_metadata_row`    | Assembly files with no metadata row (labelled `unclassified`)                                                        |
+| `assemblies_per_group`               | Genome count per group after cleaning, including `unclassified` when kept                                            |
+| `missing_values`                     | The labels treated as missing (case-insensitive)                                                                     |
+| `label_changes`                      | One entry per changed label: `raw_label`, `new_label`, `genomes`, and `changed_by` (`missing_value` or `gpsc_multi`) |
 
-| field                                  | species-wide | per-group | meaning                                                                                                                               |
-| -------------------------------------- | ------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `index_type`                           | always       | always    | `"species"` or `"target_group"`                                                                                                       |
-| `target_group`                         | always       | always    | `"species_wide"`, or the group's label                                                                                                |
-| `metadata_column`                      | always       | always    | the `--group_label` value used                                                                                                        |
-| `samples_dropped_missing_label`        | always       | omitted   | samples with no value in `--group_label` at all                                                                                       |
-| `samples_dropped_missing_assembly`     | always       | always    | samples with a label but no matching assembly on disk -- this one genuinely varies by group, so per-group indexes get their own count |
-| `assemblies_excluded_missing_metadata` | always       | omitted   | assembly files on disk with no matching metadata row                                                                                  |
-| `total_assemblies_written`             | always       | always    | assemblies actually written to this index's `file_colors_input.txt`                                                                   |
+## How it works
 
-For the Nextflow channel-level contract (`metadata_ch`/`assembly_ch` in, `sbwt_index`/`lineage_index`/`candidate_index` out) that `BUILD_COLOR_INDEX` exposes for wiring into a parent pipeline, see the [themisto2 sub-workflow README](assorted-sub-workflows/themisto2/README.md).
+### Pipeline stages
 
-### Parameters
+1. **BUILD_COLOUR_INDEX**: clean group labels (see [Cleaning group labels](#cleaning-group-labels)), colour-map assemblies by group, and build a species-wide SBWT/Themisto2 index from all genomes. Changing any label column rebuilds this index, which takes a long time for large species (~42k genomes for GPSC), so set them before a run
+2. **Group-specificity filtering**: for each target group (from `target_groups`, or every group with ≥ `--candidate_min_genome_count` genomes when it's left blank), keep only k-mers that are group-core (present in ≥ `--candidate_min_freq` of the group) and group-specific (present in ≤ `--specificity_max_outside` of any single other group)
+3. **Rebuild candidate index**: rebuild each group's filtered k-mers into its own SBWT/Themisto2 index (a QC gate), then dump it back to candidate unitigs
+4. **ATB cross-species check**: pseudoalign the candidates against the AllTheBacteria species index (`--atb_index`) and keep only markers found in ≥ `--atb_min_within` of the target species' k-mers and ≤ `--atb_max_outside` of any other ATB species → final markers. Species that aren't in ATB skip this step with a warning, and their candidates go forward unchecked
+5. **POST_PROCESS_MARKERS** (opt-in, `--marker_post_processing`): filter on length and global GC%; soft-mask (lowercase) local windows outside the GC range
 
-Run `nextflow run main.nf --help` for the full, always-up-to-date list (rendered from [schema.json](schema.json) plus the [themisto2 sub-workflow's schema](assorted-sub-workflows/themisto2/schema.json)). Summary below:
+### Key concepts
 
-**General options**
+- **species index**: all genomes of a species, coloured by group (`--group_label`)
+- **candidate index**: k-mers that are group-core and group-specific within the species (per target group)
+- **markers**: candidates that also pass the ATB cross-species check, i.e. aren't found in other bacterial species
 
-| Option              | Type      | Default     | Description                                                                                                |
-| ------------------- | --------- | ----------- | ---------------------------------------------------------------------------------------------------------- |
-| `--outdir`          | `path`    | `./results` | Directory where results are written.                                                                       |
-| `--monochrome_logs` | `boolean` | `false`     | Output logs in plain ASCII.                                                                                |
-| `--temp_space`      | `integer` | `10000`     | Temp storage (MB) requested for processes that need it (e.g. GGCAT), via the `request_temp` process label. |
+### Why not a colour index per group?
 
----
+Building a full colour index for every group doesn't scale (e.g. _S. pneumoniae_ has 765+ GPSCs). Instead, LSMD filters the species-wide Themisto2 export and rebuilds only the survivors into each group's candidate index — much faster and more memory-efficient.
 
-**Input options** (colour mapping)
+## Parameters
 
-| Option              | Type     | Default          | Description                                                                             |
-| ------------------- | -------- | ---------------- | --------------------------------------------------------------------------------------- |
-| `--metadata`        | `path`   | `null`           | CSV/TSV with one row per assembly, incl. a grouping column.                             |
-| `--sample_col`      | `string` | `Sample_ID`      | Metadata column matched against assembly filenames.                                     |
-| `--group_label`     | `string` | `null`           | Metadata column used to group assemblies into colours (required).                       |
-| `--assembly_input`  | `path`   | `null`           | Directory of assembly FASTAs, or a `.txt` path-list.                                    |
-| `--assembly_suffix` | `string` | `.contigs.fasta` | Suffix appended to `--sample_col` to form the assembly filename (directory input only). |
-| `--target_groups`   | `string` | `""`             | Comma-separated lineage label(s) to also build `lineage_index` for.                     |
+Run `nextflow run main.nf --help` for the full, always-up-to-date list.
 
----
+### Core parameters
 
-**Index build options** (GGCAT / SBWT / Themisto2, shared across `species_index`/`lineage_index`/`candidate_index`)
+| Option                   | Type    | Default     | Description                                                                                                                                                                   |
+| ------------------------ | ------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--manifest`             | path    | —           | **Required.** Manifest TSV (see [Input](#input))                                                                                                                              |
+| `--group_label`          | string  | —           | **Required.** Metadata column whose values become the groups                                                                                                                  |
+| `--sample_col`           | string  | `Sample_ID` | Metadata column matched to assembly filenames                                                                                                                                 |
+| `--assembly_suffix`      | string  | `.fasta`    | Suffix appended to `--sample_col` to form the expected filename (directory input only)                                                                                        |
+| `--outdir`               | path    | `./results` | Output directory                                                                                                                                                              |
+| `--publish_intermediate` | boolean | `false`     | Also publish intermediates: GGCAT unitigs, SBWT indexes, dumped unitigs, the index export and `themisto2 stats` output (`<species>/index/…`), and the colour-mapping QC files |
 
-| Option                         | Type      | Default | Description                                                                                                                           |
-| ------------------------------ | --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `--color_index_kmer_size`      | `integer` | `31`    | k-mer size used consistently across GGCAT, SBWT and Themisto2. Must match the background index.                                       |
-| `--temp_dir`                   | `path`    | `""`    | Scratch root for GGCAT/SBWT temp/working dirs. Falls back to a task-local work dir; only set for full background-DB-scale runs.       |
-| `--candidate_min_freq`         | `string`  | `core`  | Presence-fraction preset (`core` ≥0.95, `relaxed` ≥0.5, `catchall` ≥1 genome) or a literal fraction, for `candidate_index` filtering. |
-| `--candidate_min_genome_count` | `integer` | `5`     | Absolute genome-count floor for `candidate_index` filtering, alongside `--candidate_min_freq`.                                        |
+### Index building
 
----
+| Option                     | Type    | Default | Description                                                                          |
+| -------------------------- | ------- | ------- | ------------------------------------------------------------------------------------ |
+| `--colour_index_kmer_size` | integer | 31      | k-mer size for GGCAT/SBWT/Themisto2                                                  |
+| `--temp_dir`               | path    | —       | Scratch root for GGCAT/SBWT temp files (optional; falls back to task-local work dir) |
+| `--temp_space`             | integer | 10000   | Temp storage (MB) requested for processes needing it                                 |
 
-**Step08 -- set-difference options**
+### Group-specificity filtering
 
-| Option            | Type   | Default               | Description                                                                                         |
-| ----------------- | ------ | --------------------- | --------------------------------------------------------------------------------------------------- |
-| `--bg_index`      | `path` | Sanger farm ATB index | Background SBWT index that `bg_excl`/`markers` are diffed against, unless `--bg_excl_index` is set. |
-| `--bg_excl_index` | `path` | `""`                  | An already-computed `bg_excl` index to reuse, skipping the ATB-scale diff.                          |
+| Option                         | Type    | Default | Description                                                                                                                            |
+| ------------------------------ | ------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `--candidate_min_freq`         | string  | `core`  | Within-group presence cutoff: `core` (≥0.95), `relaxed` (≥0.5), `catchall` (>0), or a literal 0.0–1.0 (e.g. `0.8`)                     |
+| `--candidate_min_genome_count` | integer | 5       | Absolute genome-count floor (on top of `--candidate_min_freq`). Also the size below which another group is ignored as an outside group |
+| `--specificity_max_outside`    | string  | `0.05`  | Max presence fraction (0.0–1.0) allowed in any single other group; `null` = core-only (no specificity test)                            |
 
----
+### ATB cross-species check
 
-**Step09 -- candidate marker post-processing** (`--primer_post_processing`)
+The defaults point at the ATB species index on the Sanger farm. Off the farm, supply your own.
 
-| Option                     | Type      | Default                   | Description                                                                                                                                |
-| -------------------------- | --------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--primer_post_processing` | `boolean` | `false`                   | Filter/mask `markers` for PCR/primer-design suitability. Off by default -- the pipeline stops at the `markers` SBWT index/FASTA otherwise. |
-| `--primer_min_length`      | `integer` | `100`                     | Minimum candidate marker length in bp.                                                                                                     |
-| `--primer_gc_min`          | `float`   | `35.0`                    | Minimum global GC% a candidate's whole sequence must fall within.                                                                          |
-| `--primer_gc_max`          | `float`   | `60.0`                    | Maximum global GC% a candidate's whole sequence must fall within.                                                                          |
-| `--primer_window_size`     | `integer` | `--color_index_kmer_size` | Local sliding-window size (bp) for the GC check. Out-of-range windows are soft-masked (lowercased), not rejected.                          |
-| `--primer_write_rejected`  | `boolean` | `true`                    | Write rejected (too-short / out-of-range) candidates to their own FASTA.                                                                   |
-| `--primer_plot`            | `boolean` | `true`                    | Generate the length/GC diagnostic plot.                                                                                                    |
+| Option               | Type  | Default                        | Description                                                                                                         |
+| -------------------- | ----- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `--atb_index`        | path  | ATB-species.thm2 (Sanger farm) | Themisto2 index of AllTheBacteria, one colour per species                                                           |
+| `--atb_colour_names` | path  | color_names.txt (Sanger farm)  | Colour ID → ATB species name, matching `--atb_index`                                                                |
+| `--atb_min_within`   | float | 0.95                           | Minimum fraction of a marker's k-mers found in the target species                                                   |
+| `--atb_max_outside`  | float | `0.05`                         | Maximum fraction of a marker's k-mers allowed in any other ATB species (independent of `--specificity_max_outside`) |
 
-### Dependencies
+### Marker post-processing (--marker_post_processing)
 
-- Nextflow ≥ 21.04.0
-- All software dependencies are containerised (Docker/Singularity images).
-- Step08 requires a pre-built background SBWT index at the same `--color_index_kmer_size` (Sanger HPC default: ATB, via `--bg_index`).
+| Option                     | Type    | Default                       | Description                                                                                |
+| -------------------------- | ------- | ----------------------------- | ------------------------------------------------------------------------------------------ |
+| `--marker_post_processing` | boolean | `false`                       | Filter/mask markers for downstream assay design (PCR primers or bait capture)              |
+| `--marker_min_length`      | integer | required with post-processing | Minimum marker length (bp)                                                                 |
+| `--marker_gc_min`          | float   | required with post-processing | Minimum global GC%                                                                         |
+| `--marker_gc_max`          | float   | required with post-processing | Maximum global GC%                                                                         |
+| `--marker_window_size`     | integer | `--colour_index_kmer_size`    | Sliding-window size (bp) for local GC check; out-of-range windows soft-masked (lowercased) |
+| `--marker_write_rejected`  | boolean | `true`                        | Write rejected candidates to separate FASTA                                                |
+| `--marker_plot`            | boolean | `true`                        | Generate length/GC diagnostic plot                                                         |
+
+## Troubleshooting
+
+### Q: My group has no markers (empty FASTA)
+
+**A:** Either no k-mers passed group-specificity filtering, or none passed the ATB check.
+
+Try one of:
+
+- **Check where they were lost:** `candidate_marker_filtering/<species>_<group>_stats.txt` for group-specificity filtering, and `atb_cross_species/<group>/<group>_atb_check_summary.txt` for the ATB check
+- **Relax the within-group cutoff:** `--candidate_min_freq relaxed` (≥0.5 instead of ≥0.95)
+- **Increase other-group tolerance:** `--specificity_max_outside 0.1` (allow up to 10% presence in other groups)
+- **If most candidates are `FLAG` in the ATB check:** look at the top off-target species in the summary. A close relative ATB can't tell apart from your species can be listed in `atb_exclude_species`
+
+### Q: A group I expected is missing, or there's a group I didn't expect
+
+**A:** Check `label_changes` and `assemblies_per_group` in `<species>/colour_mapping/<species>_stats.json` (run with `--publish_intermediate`). A GPSC label may have been merged (`gpsc_multi`), sent to `unclassified` and dropped (`missing_value`), or kept as written because no rule applied. Fix the label in the metadata.
+
+### Q: A big group is losing markers it should have
+
+**A:** Look at the `outside_lineage` column in `<species>_<group>_specificity.tsv`. If it's a catch-all label (e.g. `Non-7PET_unclassified`) that may contain your target's genomes, classify those genomes. If it's a GPS merge label like `1215;5`, check `--group_label` is `GPSC` so it's merged into its GPSC.
+
+### Q: The ATB check step is queued for a long time
+
+**A:** Each group's ATB pseudoalignment loads the full ATB species index, so it asks for 350 GB (doubling on each retry); under the `standard` profile on LSF that goes to the `hugemem` queue. With many target groups, those jobs queue behind each other. List fewer groups in `target_groups` to reduce the load.
+
+### Q: Can I reuse indexes from a previous run?
+
+**A:** Yes, with `-resume` from the same launch directory and work directory. The species-wide index is reused as long as the metadata and assemblies are unchanged, so changing `--candidate_min_freq`, `target_groups` or the ATB settings only reruns the later steps.
+
+## Known limitations and follow-ups
+
+- **Group labels with `/`, spaces or `;`** end up in output paths and commands and may break them. They aren't checked yet; rename such labels in the metadata (GPSC `;` labels are handled, see [Cleaning group labels](#cleaning-group-labels))
+- **Markers aren't checked against unclassified genomes**, since they're always dropped. For GPS this includes the `NA` novel clusters, which are real non-targets. Validate markers against near-neighbours (e.g. with BLAST) as a backstop. A classification step for unknown genomes is planned before the pipeline runs; if popPUNK's `_clusters.csv` is available, novel clusters could be given their real clusters and kept
 
 ## Software versions
 
-| Software                        | Version               | Image                                                                                          |
-| ------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------- |
-| GGCAT                           | 2.2.0                 | `quay.io/biocontainers/ggcat:2.2.0--hf1b6044_0`                                                |
-| SBWT (sbwt-rs-cli)              | 0.4.2                 | Sanger-internal `.sif` build (see [sbwt.nf](assorted-sub-workflows/themisto2/modules/sbwt.nf)) |
-| Themisto2                       | 0.0.1                 | `quay.io/sangerpathogens/themisto2:0.0.1`                                                      |
-| pandas / Biopython / matplotlib | 2.2.1 / 1.87 / 3.10.9 | `quay.io/sangerpathogens/pandas:2.2.1`                                                         |
+| Software           | Version                     | Container                                         | Used by                                             |
+| ------------------ | --------------------------- | ------------------------------------------------- | --------------------------------------------------- |
+| GGCAT              | 2.2.0                       | `quay.io/biocontainers/ggcat:2.2.0--hf1b6044_0`   | index building                                      |
+| SBWT (sbwt-rs-cli) | 0.4.2 (patched, `-f93d92c`) | Sanger-internal `.sif`                            | index building, candidate unitig dump               |
+| Themisto2          | 0.0.1                       | `quay.io/sangerpathogens/themisto2:0.0.1`         | index building, ATB pseudoalignment                 |
+| pandas             | 2.2.1                       | `quay.io/sangerpathogens/pandas:2.2.1`            | colour mapping, group-specificity filter, ATB check |
+| python_graphics    | 1.1.7                       | `quay.io/sangerpathogens/python_graphics:1.1.7`   | marker post-processing (Biopython, matplotlib)      |
+| seqkit             | 2.10.0                      | `quay.io/biocontainers/seqkit:2.10.0--h9ee0642_0` | per-stage count checkpoints                         |
 
-See `assorted-sub-workflows/themisto2/modules/` and `modules/` for pinned container versions.
+All software dependencies are containerised (Docker/Singularity).
 
-## Issues and Contributions
+## Issues and contributions
 
-**GitHub/GitLab users:** if you find an issue with this pipeline, or would like to suggest an improvement, please log an issue or open a merge request on this repository.
-
-**Sanger users:** if you need internal support, you can raise an issue on the PAM Freshservice portal: https://sanger.freshservice.com/support/catalog/items/426
+- **GitHub/GitLab:** Log an issue or open a merge request on this repository
+- **Sanger users:** Raise an issue on the PAM Freshservice portal: https://sanger.freshservice.com/support/catalog/items/426

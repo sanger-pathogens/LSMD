@@ -28,12 +28,13 @@ def printHelp() {
 //
 // SUBWORKFLOWS
 //
-include { BUILD_COLOR_INDEX } from './assorted-sub-workflows/themisto2/subworkflows/build_color_index.nf'
-include { SET_DIFF_CALCULATIONS } from './assorted-sub-workflows/themisto2/subworkflows/setdiff_filter.nf'
-include { SBWT_DUMP_UNITIGS } from './assorted-sub-workflows/themisto2/modules/sbwt.nf'
+include { BUILD_COLOUR_INDEX } from './assorted-sub-workflows/themisto2/subworkflows/build_colour_index.nf'
+include { MARKER_FILTERING } from './assorted-sub-workflows/themisto2/subworkflows/marker_filtering.nf'
 include { POST_PROCESS_MARKERS } from './modules/post_processing_markers.nf'
-include { DESIGN_PRIMERS } from './modules/primer3.nf'
-include { CHECKPOINT_COUNT } from './assorted-sub-workflows/themisto2/modules/checkpoint_count.nf'
+// In progress, not wired in yet: primer design (modules/primer3.nf) and bait design
+// (modules/bait_capture.nf).
+// include { DESIGN_PRIMERS } from './modules/primer3.nf'
+include { CHECKPOINT_FASTA; CHECKPOINT_REPORT } from './assorted-sub-workflows/themisto2/modules/checkpoint.nf'
 include { MANIFEST_PARSE } from './subworkflows/manifest_parse.nf'
 
 
@@ -50,74 +51,78 @@ workflow {
         exit 0
     }
 
-    // BUILD_COLOR_INDEX takes one pre-paired item per species:
-    //   [ [ID: species, target_groups: <csv>], metadata_file, assembly_input ]
-    // Either from a --manifest TSV (one row per species) or, for a single species,
-    // built from the --metadata / --assembly_input / --target_groups params.
-    if (params.manifest) {
-        MANIFEST_PARSE(params.manifest)
-        samples_ch = MANIFEST_PARSE.out.samples
-    } else {
-        // Single species: ID defaults to the metadata file's basename.
-        samples_ch = Channel.of([
-            [ID: file(params.metadata).baseName, target_groups: params.target_groups ?: ''],
-            file(params.metadata),
-            file(params.assembly_input),
-        ])
+    // BUILD_COLOUR_INDEX takes, per species: samples [ [ID: species], metadata_file,
+    // assembly_input ], from the --manifest TSV (one row per species), and builds ONLY the
+    // species-wide colour index -- no filtering happens there any more (see
+    // build_colour_index.nf's header comment).
+    if (!params.manifest) {
+        exit 1, "ERROR: --manifest is required -- a TSV, one row per species, columns " +
+                "species / metadata / assemblies / target_groups / atb_exclude_species. " +
+                "See the README's Input section."
     }
-
-    BUILD_COLOR_INDEX(samples_ch)
-
-    // step08 -- set-difference filtering. bg_excl (C) = background - species_index (A);
-    // markers (G) = candidate_index (E) - bg_excl. candidate_index (E) is only
-    // non-empty for species whose meta.target_groups is set; bg_excl is built inside
-    // SET_DIFF_CALCULATIONS from --bg_index / --bg_excl_index.
-    SET_DIFF_CALCULATIONS(
-        BUILD_COLOR_INDEX.out.sbwt_index,
-        BUILD_COLOR_INDEX.out.candidate_index
-    )
-
-    // Per-stage count checkpoints -> one funnel TSV of this run's own numbers.
-    // Accumulate rows from every stage, then collectFile once at the end.
-    checkpoint_rows = BUILD_COLOR_INDEX.out.checkpoints
-        .mix(SET_DIFF_CALCULATIONS.out.checkpoints)
-
-    // Candidate marker post-processing (step09) -- off by default (see
-    // --primer_post_processing's help_text). markers (G) is one .sbwt per
-    // species/lineage combo produced by SET_DIFF_CALCULATIONS; dump each to
-    // FASTA, then filter/mask for PCR/primer-design suitability.
-    if (params.primer_post_processing) {
-        SBWT_DUMP_UNITIGS(SET_DIFF_CALCULATIONS.out.markers)
-        POST_PROCESS_MARKERS(SBWT_DUMP_UNITIGS.out.unitigs)
-
-        // Checkpoint the post-processing funnel: G dumped to FASTA -> markers
-        // passing / rejected by the length + GC filter.
-        SBWT_DUMP_UNITIGS.out.unitigs.map    { meta, f -> [meta, 'G_markers_09_dumped_fasta', 'fasta', f] }
-        | mix( POST_PROCESS_MARKERS.out.filtered.map { meta, f -> [meta, 'H_markers_09_postproc_pass', 'fasta', f] } )
-        | mix( POST_PROCESS_MARKERS.out.rejected.map { meta, f -> [meta, 'H_markers_09_postproc_reject', 'fasta', f] } )
-        | set { postproc_checkpoint_inputs }
-
-        CHECKPOINT_COUNT(postproc_checkpoint_inputs)
-        checkpoint_rows = checkpoint_rows.mix(CHECKPOINT_COUNT.out.row)
-
-        // Primer3 design (step10) -- off by default, and only meaningful once
-        // POST_PROCESS_MARKERS has actually run (it needs the non_designable
-        // coordinates from that step's FASTA headers). Runs on the passed/filtered
-        // markers only -- rejected markers (too short/global-GC-out-of-range)
-        // are never worth designing primers against.
-        if (params.primer3_design) {
-            DESIGN_PRIMERS(POST_PROCESS_MARKERS.out.filtered)
+    // Primer design is still in progress (see the commented-out include above): stop
+    // rather than silently ignore the flag.
+    if (params.primer3_design) {
+        exit 1, "ERROR: --primer3_design isn't available yet -- primer design is still in progress."
+    }
+    if (params.marker_post_processing) {
+        // No defaults for the thresholds: the user picks them for their assay. A bare
+        // `--marker_gc_min` (no value) arrives as boolean true, so check for a number.
+        def missing = ['marker_min_length', 'marker_gc_min', 'marker_gc_max'].findAll { !(params[it] instanceof Number) }
+        if (missing) {
+            exit 1, "ERROR: --marker_post_processing needs a numeric value for " +
+                    missing.collect { "--${it}" }.join(', ') + " (no defaults)."
+        }
+        if (params.marker_gc_min >= params.marker_gc_max) {
+            exit 1, "ERROR: --marker_gc_min (${params.marker_gc_min}) must be below --marker_gc_max (${params.marker_gc_max})."
         }
     }
+    MANIFEST_PARSE(params.manifest)
+    samples_ch = MANIFEST_PARSE.out.samples
 
-    checkpoint_rows
-    | map { meta, row -> row }
-    | collectFile(
-        name: 'pipeline_counts.tsv',
-        storeDir: "${params.outdir}/checkpoints",
-        keepHeader: true,
-        skip: 1,
-        sort: true,
+    BUILD_COLOUR_INDEX(samples_ch)
+
+    // Lineage-specificity filtering, candidate index rebuild, and the ATB cross-species
+    // check (replaces the old bg_excl/markers sbwt set-diff) -- all keyed off the manifest's
+    // species (as the ATB target) / target_groups / atb_exclude_species columns, kept out of meta
+    // upstream so editing either doesn't bust the species index cache (see manifest_parse.nf).
+    MARKER_FILTERING(
+        BUILD_COLOUR_INDEX.out.species_export,
+        MANIFEST_PARSE.out.target_groups,
+        MANIFEST_PARSE.out.atb_target_species,
+        MANIFEST_PARSE.out.atb_exclude_species
     )
-    // baitcapture tool TODO create in location: /data/pam/team230/sm71/scratch/gps_project/lsmd/modules/
+
+    // Per-stage count checkpoints -> one pipeline_counts.tsv per species.
+    // Accumulate rows from every stage, then CHECKPOINT_REPORT once per species at the end.
+    checkpoint_rows = BUILD_COLOUR_INDEX.out.checkpoints
+        .mix(MARKER_FILTERING.out.checkpoints)
+
+    // Candidate marker post-processing -- off by default (see
+    // --marker_post_processing's help_text). MARKER_FILTERING.out.markers is already one
+    // FASTA per species/lineage combo (ATB-checked, or unchecked with a warning -- see
+    // marker_filtering.nf); filter/mask it for downstream assay design.
+    if (params.marker_post_processing) {
+        POST_PROCESS_MARKERS(MARKER_FILTERING.out.markers)
+
+        POST_PROCESS_MARKERS.out.filtered.map { meta, f -> [meta, 'markers_postproc_pass', 'fasta', f] }
+        | mix( POST_PROCESS_MARKERS.out.rejected.map { meta, f -> [meta, 'markers_postproc_reject', 'fasta', f] } )
+        | set { postproc_checkpoint_inputs }
+
+        CHECKPOINT_FASTA(postproc_checkpoint_inputs)
+        checkpoint_rows = checkpoint_rows.mix(CHECKPOINT_FASTA.out.row)
+
+        // Primer design -- in progress, not wired in yet. When it is, it runs on the
+        // passed/filtered markers only (it needs the soft-masking from this step).
+        // if (params.primer3_design) {
+        //     DESIGN_PRIMERS(POST_PROCESS_MARKERS.out.filtered)
+        // }
+    }
+
+    // Rows sort into pipeline order inside CHECKPOINT_REPORT (see checkpoint_steps() in
+    // checkpoint.nf); always published to results/<species>/checkpoint/pipeline_counts.tsv.
+    checkpoint_rows
+    | map { meta, row -> [meta.species ?: meta.ID, row] }
+    | groupTuple
+    | CHECKPOINT_REPORT
 }
