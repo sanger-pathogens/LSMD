@@ -66,7 +66,7 @@ workflow {
         exit 1, "ERROR: --primer3_design isn't available yet -- primer design is still in progress."
     }
     if (params.marker_post_processing) {
-        // No defaults for the thresholds: the user picks them for their assay. A bare
+        // Thresholds default values are `null`: it is required that the user picks numeric values for their assay. A bare
         // `--marker_gc_min` (no value) arrives as boolean true, so check for a number.
         def missing = ['marker_min_length', 'marker_gc_min', 'marker_gc_max'].findAll { !(params[it] instanceof Number) }
         if (missing) {

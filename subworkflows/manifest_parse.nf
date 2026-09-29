@@ -3,8 +3,9 @@
 //
 //   species             the species' ATB colour name, e.g. streptococcus_pneumoniae or
 //                       vibrio_cholerae. Used as the output folder/file prefix
-//                       (index_species/<species>/ etc.), so no whitespace or '/', and as
-//                       the target of the ATB cross-species check (marker_filtering.nf).
+//                       (index_species/<species>/ etc.), so lower case, no whitespace or 
+//                       please use ('_') as joining character), and as the target of the ATB
+//                       cross-species check (marker_filtering.nf).
 //                       ATB's lettered splits of a species (streptococcus_pneumoniaea,
 //                       ...b, ...) are picked up automatically by expand_target_species().
 //                       A species that isn't in --atb_colour_names skips the ATB check with
