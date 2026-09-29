@@ -28,14 +28,15 @@ def printHelp() {
 //
 // SUBWORKFLOWS
 //
-include { BUILD_COLOUR_INDEX } from './assorted-sub-workflows/themisto2/subworkflows/build_colour_index.nf'
-include { MARKER_FILTERING } from './assorted-sub-workflows/themisto2/subworkflows/marker_filtering.nf'
-include { POST_PROCESS_MARKERS } from './modules/post_processing_markers.nf'
+include { BUILD_COLOUR_INDEX                    } from './assorted-sub-workflows/themisto2/subworkflows/build_colour_index.nf'
+include { MARKER_FILTERING                      } from './assorted-sub-workflows/themisto2/subworkflows/marker_filtering.nf'
+include { POST_PROCESS_MARKERS                  } from './modules/post_processing_markers.nf'
+include { VALIDATE_PARAMS                       } from './modules/validate_parameters.nf'
 // In progress, not wired in yet: primer design (modules/primer3.nf) and bait design
 // (modules/bait_capture.nf).
 // include { DESIGN_PRIMERS } from './modules/primer3.nf'
-include { CHECKPOINT_FASTA; CHECKPOINT_REPORT } from './assorted-sub-workflows/themisto2/modules/checkpoint.nf'
-include { MANIFEST_PARSE } from './subworkflows/manifest_parse.nf'
+include { CHECKPOINT_FASTA; CHECKPOINT_REPORT   } from './assorted-sub-workflows/themisto2/modules/checkpoint.nf'
+include { MANIFEST_PARSE                        } from './subworkflows/manifest_parse.nf'
 
 
 /*
@@ -46,37 +47,14 @@ include { MANIFEST_PARSE } from './subworkflows/manifest_parse.nf'
 
 workflow {
 
+
     if (params.help) {
         printHelp()
         exit 0
     }
 
-    // BUILD_COLOUR_INDEX takes, per species: samples [ [ID: species], metadata_file,
-    // assembly_input ], from the --manifest TSV (one row per species), and builds ONLY the
-    // species-wide colour index -- no filtering happens there any more (see
-    // build_colour_index.nf's header comment).
-    if (!params.manifest) {
-        exit 1, "ERROR: --manifest is required -- a TSV, one row per species, columns " +
-                "species / metadata / assemblies / target_groups / atb_exclude_species. " +
-                "See the README's Input section."
-    }
-    // Primer design is still in progress (see the commented-out include above): stop
-    // rather than silently ignore the flag.
-    if (params.primer3_design) {
-        exit 1, "ERROR: --primer3_design isn't available yet -- primer design is still in progress."
-    }
-    if (params.marker_post_processing) {
-        // Thresholds default values are `null`: it is required that the user picks numeric values for their assay. A bare
-        // `--marker_gc_min` (no value) arrives as boolean true, so check for a number.
-        def missing = ['marker_min_length', 'marker_gc_min', 'marker_gc_max'].findAll { !(params[it] instanceof Number) }
-        if (missing) {
-            exit 1, "ERROR: --marker_post_processing needs a numeric value for " +
-                    missing.collect { "--${it}" }.join(', ') + " (no defaults)."
-        }
-        if (params.marker_gc_min >= params.marker_gc_max) {
-            exit 1, "ERROR: --marker_gc_min (${params.marker_gc_min}) must be below --marker_gc_max (${params.marker_gc_max})."
-        }
-    }
+    VALIDATE_PARAMS()
+    
     MANIFEST_PARSE(params.manifest)
     samples_ch = MANIFEST_PARSE.out.samples
 
