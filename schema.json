@@ -19,12 +19,6 @@
         "help_text": "Should logs appear in plain ASCII"
       }
     },
-    "Resource options": {
-      "temp_space": {
-        "default": "10000",
-        "help_text": "Scratch/tmp storage (MB) requested from LSF via 'rusage[tmp=...]' for processes labelled request_temp (GGCAT, SBWT build, Themisto2 build). Raise for background-DB-scale runs."
-      }
-    },
     "Candidate marker post-processing (post_processing_markers.nf)": {
       "marker_post_processing": {
         "default": "false",
